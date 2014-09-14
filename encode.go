@@ -1,12 +1,14 @@
 package main
 
 import (
+	"encoding/binary"
 	"flag"
 	"fmt"
 	"github.com/runningwild/argus/qtree"
 	"image"
 	"image/color"
 	"image/jpeg"
+	"io"
 	"math"
 	"os"
 )
@@ -79,18 +81,69 @@ func doDiff(q *qtree.Tree, a, b image.Image) {
 	})
 }
 
+var endian = binary.LittleEndian
+
+func check(err error) {
+	if err != nil {
+		panic(err)
+	}
+}
+
+type subSection struct {
+	im     image.Image
+	bounds image.Rectangle
+	offset image.Point
+}
+
+func makeSubSection(im image.Image, region image.Rectangle) *subSection {
+	return &subSection{
+		im:     im,
+		bounds: region.Sub(region.Min),
+		offset: region.Min,
+	}
+}
+func (ss *subSection) Bounds() image.Rectangle {
+	return ss.bounds
+}
+func (ss *subSection) At(x, y int) color.Color {
+	return ss.im.At(x+ss.offset.X, y+ss.offset.Y)
+}
+func (ss *subSection) ColorModel() color.Model {
+	return ss.im.ColorModel()
+}
+
+func encodeDiff(q *qtree.Tree, a, b image.Image, w io.Writer) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("Failure: %v", r)
+		}
+	}()
+	check(binary.Write(w, endian, int32(q.Bounds().Dx())))
+	check(binary.Write(w, endian, int32(q.Bounds().Dy())))
+	doDiff(q, a, b)
+	q.TraverseTopDown(func(t *qtree.Tree) bool {
+		if t.Info.Over {
+			check(binary.Write(w, endian, byte(1)))
+		} else {
+			check(binary.Write(w, endian, byte(0)))
+		}
+		return !t.Info.Over
+	})
+	q.TraverseTopDown(func(t *qtree.Tree) bool {
+		if t.Info.Over {
+			check(jpeg.Encode(w, makeSubSection(b, t.Bounds()), nil))
+		}
+		return !t.Info.Over
+	})
+	return
+}
+
 func main() {
-	// for i := 0; i < 20; i++ {
-	// 	mp := maxPowerForRegion(1, 1<<uint(i))
-	// 	fmt.Printf("%d: %0.2v, %0.2v\n", i, mp, mp/float64(uint(1)<<uint(i)))
-	// }
-	// return
 	flag.Parse()
 	if *in0 == "" || *in1 == "" {
 		fmt.Printf("Must specify both input files\n")
 		os.Exit(1)
 	}
-	fmt.Printf("Hello, world!\n")
 	f0, err := os.Open(*in0)
 	if err != nil {
 		fmt.Printf("Failed to open file %q: %v\n", *in0, err)
@@ -116,11 +169,25 @@ func main() {
 	}
 
 	t := qtree.MakeTree(im0.Bounds().Dx(), im0.Bounds().Dy(), minDim)
+	argus, err := os.Create("diff.argus")
+	if err != nil {
+		fmt.Printf("Failed to create output file: %v\n", err)
+		os.Exit(1)
+	}
+	defer argus.Close()
+	err = encodeDiff(t, im0, im1, argus)
+	if err != nil {
+		fmt.Printf("Failed to encode argus: %v\n", err)
+		os.Exit(1)
+	}
+	return
+
 	doDiff(t, im0, im1)
 	fmt.Printf("Root: %v\n", t.Info)
 	for i := 0; i < 4; i++ {
 		fmt.Printf("Child(%d): %v\n", i, t.Child(i).Info)
 	}
+	return
 	t.TraverseTopDown(func(t *qtree.Tree) bool {
 		if t.Info.Over {
 			fmt.Printf("OVER %v: %f\n", t.Bounds(), t.Info.Power)
