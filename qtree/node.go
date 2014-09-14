@@ -9,6 +9,7 @@ type params struct {
 }
 
 type Info struct {
+	Over  bool
 	Power float64
 }
 
@@ -22,7 +23,7 @@ type Tree struct {
 	// kids in clockwise order starting from the top-left
 	kids []*Tree
 
-	info Info
+	Info Info
 }
 
 func (t *Tree) divide() {
@@ -45,14 +46,19 @@ func (t *Tree) divide() {
 // Visitor is applied used in the Traverse* functions.  In the case of TraverseTopDown, the return
 // value from Visitor will indicate if the children should be visited.  The return value is ignored
 // in TraverseBottomUp.
-type Visitor func(x0, y0, x1, y1 int, leaf bool, info *Info) bool
+type Visitor func(*Tree) bool
 
 func (t *Tree) Bounds() image.Rectangle {
 	return image.Rect(t.x0, t.y0, t.x1, t.y1)
 }
-
+func (t *Tree) Leaf() bool {
+	return t.kids == nil
+}
+func (t *Tree) Child(n int) *Tree {
+	return t.kids[n]
+}
 func (t *Tree) TraverseTopDown(visitor Visitor) {
-	if !visitor(t.x0, t.y0, t.x1, t.y1, t.kids == nil, &t.info) {
+	if !visitor(t) {
 		return
 	}
 	for _, kid := range t.kids {
@@ -64,7 +70,7 @@ func (t *Tree) TraverseBottomUp(visitor Visitor) {
 	for _, kid := range t.kids {
 		kid.TraverseBottomUp(visitor)
 	}
-	visitor(t.x0, t.y0, t.x1, t.y1, t.kids == nil, &t.info)
+	visitor(t)
 }
 
 func MakeTree(dx, dy, minDim int) *Tree {

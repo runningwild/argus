@@ -13,12 +13,12 @@ func VisitorSpec(c gospec.Context) {
 			region[i] = make([]int, dy)
 		}
 		t := qtree.MakeTree(dx, dy, 13)
-		t.TraverseTopDown(func(x0, y0, x1, y1 int, leaf bool, info *qtree.Info) bool {
-			if !leaf {
+		t.TraverseTopDown(func(t *qtree.Tree) bool {
+			if !t.Leaf() {
 				return true
 			}
-			for x := x0; x < x1; x++ {
-				for y := y0; y < y1; y++ {
+			for y := t.Bounds().Min.Y; y < t.Bounds().Max.Y; y++ {
+				for x := t.Bounds().Min.X; x < t.Bounds().Max.X; x++ {
 					region[x][y]++
 				}
 			}
@@ -29,12 +29,12 @@ func VisitorSpec(c gospec.Context) {
 				c.Expect(region[x][y], gospec.Equals, 1)
 			}
 		}
-		t.TraverseBottomUp(func(x0, y0, x1, y1 int, leaf bool, info *qtree.Info) bool {
-			if !leaf {
+		t.TraverseBottomUp(func(t *qtree.Tree) bool {
+			if !t.Leaf() {
 				return true
 			}
-			for x := x0; x < x1; x++ {
-				for y := y0; y < y1; y++ {
+			for y := t.Bounds().Min.Y; y < t.Bounds().Max.Y; y++ {
+				for x := t.Bounds().Min.X; x < t.Bounds().Max.X; x++ {
 					region[x][y]++
 				}
 			}
