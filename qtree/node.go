@@ -1,5 +1,9 @@
 package qtree
 
+import (
+	"image"
+)
+
 type params struct {
 	minDim int
 }
@@ -38,15 +42,29 @@ func (t *Tree) divide() {
 	}
 }
 
+// Visitor is applied used in the Traverse* functions.  In the case of TraverseTopDown, the return
+// value from Visitor will indicate if the children should be visited.  The return value is ignored
+// in TraverseBottomUp.
 type Visitor func(x0, y0, x1, y1 int, leaf bool, info *Info) bool
 
-func (t *Tree) Traverse(visitor Visitor) {
+func (t *Tree) Bounds() image.Rectangle {
+	return image.Rect(t.x0, t.y0, t.x1, t.y1)
+}
+
+func (t *Tree) TraverseTopDown(visitor Visitor) {
 	if !visitor(t.x0, t.y0, t.x1, t.y1, t.kids == nil, &t.info) {
 		return
 	}
 	for _, kid := range t.kids {
-		kid.Traverse(visitor)
+		kid.TraverseTopDown(visitor)
 	}
+}
+
+func (t *Tree) TraverseBottomUp(visitor Visitor) {
+	for _, kid := range t.kids {
+		kid.TraverseBottomUp(visitor)
+	}
+	visitor(t.x0, t.y0, t.x1, t.y1, t.kids == nil, &t.info)
 }
 
 func MakeTree(dx, dy, minDim int) *Tree {
