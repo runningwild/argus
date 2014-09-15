@@ -26,7 +26,7 @@ var in1 = flag.String("in1", "", "Image 1")
 // a jpeg or png replacement
 
 // No cell will ever get smaller than minDim on a side
-const minDim = 16
+const minDim = 32
 
 const maxPowerPerPixel = 1.0
 
@@ -67,10 +67,10 @@ func doDiff(q *qtree.Tree, a, b image.Image) {
 				}
 			}
 		} else {
-			if t.Child(0).Info.Over && t.Child(1).Info.Over && t.Child(2).Info.Over && t.Child(3).Info.Over {
-				t.Info.Over = true
-			} else {
-				t.Info.Power = t.Child(0).Info.Power + t.Child(1).Info.Power + t.Child(2).Info.Power + t.Child(3).Info.Power
+			t.Info.Power = t.Child(0).Info.Power + t.Child(1).Info.Power + t.Child(2).Info.Power + t.Child(3).Info.Power
+			if t.Child(0).Info.Over || t.Child(1).Info.Over || t.Child(2).Info.Over || t.Child(3).Info.Over ||
+				t.Child(0).Info.AboveOver || t.Child(1).Info.AboveOver || t.Child(2).Info.AboveOver || t.Child(3).Info.AboveOver {
+				t.Info.AboveOver = true
 			}
 		}
 		if t.Info.Power > maxPowerForRegion(t.Bounds().Dx(), t.Bounds().Dy()) {
@@ -123,17 +123,22 @@ func encodeDiff(q *qtree.Tree, a, b image.Image, w io.Writer) (err error) {
 	doDiff(q, a, b)
 	q.TraverseTopDown(func(t *qtree.Tree) bool {
 		if t.Info.Over {
-			check(binary.Write(w, endian, byte(1)))
-		} else {
-			check(binary.Write(w, endian, byte(0)))
+			check(binary.Write(w, endian, byte(2)))
+			return false
 		}
-		return !t.Info.Over
+		if t.Info.AboveOver {
+			check(binary.Write(w, endian, byte(1)))
+			return true
+		}
+		check(binary.Write(w, endian, byte(0)))
+		return false
 	})
 	q.TraverseTopDown(func(t *qtree.Tree) bool {
 		if t.Info.Over {
 			check(jpeg.Encode(w, makeSubSection(b, t.Bounds()), nil))
+			return false
 		}
-		return !t.Info.Over
+		return t.Info.AboveOver
 	})
 	return
 }
@@ -180,14 +185,14 @@ func main() {
 		fmt.Printf("Failed to encode argus: %v\n", err)
 		os.Exit(1)
 	}
-	return
+	// return
 
 	doDiff(t, im0, im1)
 	fmt.Printf("Root: %v\n", t.Info)
 	for i := 0; i < 4; i++ {
 		fmt.Printf("Child(%d): %v\n", i, t.Child(i).Info)
 	}
-	return
+	// return
 	t.TraverseTopDown(func(t *qtree.Tree) bool {
 		if t.Info.Over {
 			fmt.Printf("OVER %v: %f\n", t.Bounds(), t.Info.Power)
