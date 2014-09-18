@@ -1,20 +1,21 @@
 package main
 
 import (
+	"bytes"
 	"encoding/binary"
 	"flag"
 	"fmt"
 	"github.com/runningwild/argus/qtree"
 	"image"
 	"image/color"
+	"image/draw"
 	"image/jpeg"
 	"io"
+	"io/ioutil"
 	"math"
 	"os"
+	"sort"
 )
-
-var in0 = flag.String("in0", "", "Image 0")
-var in1 = flag.String("in1", "", "Image 1")
 
 // File format
 // Dims
@@ -25,10 +26,7 @@ var in1 = flag.String("in1", "", "Image 1")
 // for each changed cell:
 // a jpeg or png replacement
 
-// No cell will ever get smaller than minDim on a side
-const minDim = 32
-
-const maxPowerPerPixel = 1.0
+const maxPowerPerPixel = 5.0
 
 func maxPowerForRegion(dx, dy int) float64 {
 	region := float64(dx * dy)
@@ -67,14 +65,25 @@ func doDiff(q *qtree.Tree, a, b image.Image) {
 				}
 			}
 		} else {
-			t.Info.Power = t.Child(0).Info.Power + t.Child(1).Info.Power + t.Child(2).Info.Power + t.Child(3).Info.Power
-			if t.Child(0).Info.Over || t.Child(1).Info.Over || t.Child(2).Info.Over || t.Child(3).Info.Over ||
-				t.Child(0).Info.AboveOver || t.Child(1).Info.AboveOver || t.Child(2).Info.AboveOver || t.Child(3).Info.AboveOver {
-				t.Info.AboveOver = true
+			under := 0
+			for i := 0; i < t.NumChildren(); i++ {
+				child := t.Child(i)
+				if child.Info.Over {
+					under++
+				}
+				if child.Info.Over || child.Info.AboveOver {
+					t.Info.AboveOver = true
+				}
+				t.Info.Power += child.Info.Power
+			}
+			if under == t.NumChildren() {
+				t.Info.Over = true
 			}
 		}
 		if t.Info.Power > maxPowerForRegion(t.Bounds().Dx(), t.Bounds().Dy()) {
 			t.Info.Over = true
+		}
+		if t.Info.Over {
 			t.Info.Power = 0
 		}
 		return true
@@ -112,130 +121,105 @@ func (ss *subSection) ColorModel() color.Model {
 	return ss.im.ColorModel()
 }
 
-func encodeDiff(q *qtree.Tree, a, b image.Image, w io.Writer) (err error) {
+type imageInfo struct {
+	im   image.Image
+	data []byte
+}
+
+func encodeDiff(infos <-chan imageInfo, w *bytes.Buffer) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("Failure: %v", r)
 		}
 	}()
-	check(binary.Write(w, endian, int32(q.Bounds().Dx())))
-	check(binary.Write(w, endian, int32(q.Bounds().Dy())))
-	doDiff(q, a, b)
-	q.TraverseTopDown(func(t *qtree.Tree) bool {
-		if t.Info.Over {
-			check(binary.Write(w, endian, byte(2)))
+	var q *qtree.Tree
+	var ref draw.Image
+	count := 0
+	for info := range infos {
+		im := info.im
+		fmt.Printf("%d\n", w.Len())
+		if ref == nil {
+			ref = image.NewRGBA(im.Bounds())
+			draw.Draw(ref, ref.Bounds(), im, image.Point{}, draw.Over)
+			q = qtree.MakeTree(im.Bounds().Dx(), im.Bounds().Dy())
+			check(binary.Write(w, endian, int32(q.Bounds().Dx())))
+			check(binary.Write(w, endian, int32(q.Bounds().Dy())))
+			continue
+		}
+		start := w.Len()
+		doDiff(q, ref, im)
+		q.TraverseTopDown(func(t *qtree.Tree) bool {
+			if t.Info.Over {
+				check(binary.Write(w, endian, byte(2)))
+				return false
+			}
+			if t.Info.AboveOver {
+				check(binary.Write(w, endian, byte(1)))
+				return true
+			}
+			check(binary.Write(w, endian, byte(0)))
 			return false
+		})
+		q.TraverseTopDown(func(t *qtree.Tree) bool {
+			if t.Info.Over {
+				ss := makeSubSection(im, t.Bounds())
+				check(jpeg.Encode(w, ss, nil))
+				draw.Draw(ref, ss.Bounds().Add(ss.offset), ss, image.Point{}, draw.Over)
+				return false
+			}
+			return t.Info.AboveOver
+		})
+		if w.Len()-start > len(info.data) {
+			fmt.Printf("Using full image\n")
+			w.Truncate(start)
+			_, err := io.Copy(w, bytes.NewBuffer(info.data))
+			check(err)
 		}
-		if t.Info.AboveOver {
-			check(binary.Write(w, endian, byte(1)))
-			return true
-		}
-		check(binary.Write(w, endian, byte(0)))
-		return false
-	})
-	q.TraverseTopDown(func(t *qtree.Tree) bool {
-		if t.Info.Over {
-			check(jpeg.Encode(w, makeSubSection(b, t.Bounds()), nil))
-			return false
-		}
-		return t.Info.AboveOver
-	})
+		out, _ := os.Create(fmt.Sprintf("ref-%02d.jpg", count))
+		count++
+		jpeg.Encode(out, ref, nil)
+		out.Close()
+	}
 	return
 }
 
 func main() {
 	flag.Parse()
-	if *in0 == "" || *in1 == "" {
-		fmt.Printf("Must specify both input files\n")
+	inputFilenames := flag.Args()
+	if len(inputFilenames) < 2 {
+		fmt.Printf("Must specify at least two files, you specified %v\n", inputFilenames)
 		os.Exit(1)
 	}
-	f0, err := os.Open(*in0)
-	if err != nil {
-		fmt.Printf("Failed to open file %q: %v\n", *in0, err)
-		os.Exit(1)
-	}
-	defer f0.Close()
-	f1, err := os.Open(*in1)
-	if err != nil {
-		fmt.Printf("Failed to open file %q: %v\n", *in1, err)
-		os.Exit(1)
-	}
-	defer f1.Close()
+	sort.Strings(inputFilenames)
 
-	im0, _, err := image.Decode(f0)
+	ims := make(chan imageInfo)
+	go func() {
+		for _, filename := range inputFilenames {
+			data, err := ioutil.ReadFile(filename)
+			if err != nil {
+				fmt.Printf("Unable to read %q: %v\n", filename, err)
+				os.Exit(1)
+			}
+			im, _, err := image.Decode(bytes.NewBuffer(data))
+			if err != nil {
+				fmt.Printf("Unable to decode %q: %v\n", filename, err)
+				os.Exit(1)
+			}
+			ims <- imageInfo{im, data}
+		}
+		close(ims)
+	}()
+	var buf bytes.Buffer
+	err := encodeDiff(ims, &buf)
 	if err != nil {
-		fmt.Printf("Unable to decode %q: %v\n", *in0, err)
+		fmt.Printf("Failed to encode argus: %v\n", err)
 		os.Exit(1)
 	}
-	im1, _, err := image.Decode(f1)
-	if err != nil {
-		fmt.Printf("Unable to decode %q: %v\n", *in1, err)
-		os.Exit(1)
-	}
-
-	t := qtree.MakeTree(im0.Bounds().Dx(), im0.Bounds().Dy(), minDim)
 	argus, err := os.Create("diff.argus")
 	if err != nil {
 		fmt.Printf("Failed to create output file: %v\n", err)
 		os.Exit(1)
 	}
 	defer argus.Close()
-	err = encodeDiff(t, im0, im1, argus)
-	if err != nil {
-		fmt.Printf("Failed to encode argus: %v\n", err)
-		os.Exit(1)
-	}
-	// return
-
-	doDiff(t, im0, im1)
-	fmt.Printf("Root: %v\n", t.Info)
-	for i := 0; i < 4; i++ {
-		fmt.Printf("Child(%d): %v\n", i, t.Child(i).Info)
-	}
-	// return
-	t.TraverseTopDown(func(t *qtree.Tree) bool {
-		if t.Info.Over {
-			fmt.Printf("OVER %v: %f\n", t.Bounds(), t.Info.Power)
-		} else {
-			fmt.Printf("under %v: %f\n", t.Bounds(), t.Info.Power)
-		}
-		return true
-	})
-	out := image.NewRGBA(t.Bounds())
-	colors := []color.Color{
-		color.RGBA{255, 0, 255, 255},
-		color.RGBA{255, 0, 0, 255},
-		color.RGBA{255, 255, 0, 255},
-		color.RGBA{255, 255, 255, 255},
-		color.RGBA{0, 0, 255, 255},
-		color.RGBA{0, 255, 0, 255},
-		color.RGBA{0, 255, 255, 255},
-	}
-	t.TraverseTopDown(func(t *qtree.Tree) bool {
-		height := 0
-		c := t
-		for !c.Leaf() {
-			height++
-			c = c.Child(0)
-		}
-		if t.Info.Over {
-			for y := t.Bounds().Min.Y; y < t.Bounds().Max.Y; y++ {
-				for x := t.Bounds().Min.X; x < t.Bounds().Max.X; x++ {
-					out.Set(x, y, colors[height%len(colors)])
-				}
-			}
-		}
-		return !t.Info.Over
-	})
-	f, err := os.Create("output.jpg")
-	if err != nil {
-		fmt.Printf("Unable to make output file: %v\n", err)
-		os.Exit(1)
-	}
-	defer f.Close()
-	err = jpeg.Encode(f, out, nil)
-	if err != nil {
-		fmt.Printf("Unable to encode output image: %v\n", err)
-		os.Exit(1)
-	}
+	io.Copy(argus, &buf)
 }

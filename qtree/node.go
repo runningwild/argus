@@ -76,6 +76,9 @@ func (t *Tree) Bounds() image.Rectangle {
 func (t *Tree) Leaf() bool {
 	return t.kids == nil
 }
+func (t *Tree) NumChildren() int {
+	return len(t.kids)
+}
 func (t *Tree) Child(n int) *Tree {
 	return t.kids[n]
 }
