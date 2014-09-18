@@ -26,7 +26,7 @@ import (
 // for each changed cell:
 // a jpeg or png replacement
 
-const maxPowerPerPixel = 5.0
+const maxPowerPerPixel = 10.0
 
 func maxPowerForRegion(dx, dy int) float64 {
 	region := float64(dx * dy)
@@ -126,6 +126,28 @@ type imageInfo struct {
 	data []byte
 }
 
+type selectedBlocks struct {
+	im      image.Image
+	offsets []image.Point
+}
+
+func (sb *selectedBlocks) addBlock(x, y int) {
+	sb.offsets = append(sb.offsets, image.Point{x, y})
+}
+func (sb *selectedBlocks) Bounds() image.Rectangle {
+	return image.Rect(0, 0, len(sb.offsets), 8)
+}
+func (sb *selectedBlocks) At(x, y int) color.Color {
+	if x < 0 || x >= len(sb.offsets)*8 {
+		return color.Black
+	}
+	offset := sb.offsets[x/8]
+	return sb.im.At(x+offset.X, y+offset.Y)
+}
+func (sb *selectedBlocks) ColorModel() color.Model {
+	return sb.im.ColorModel()
+}
+
 func encodeDiff(infos <-chan imageInfo, w *bytes.Buffer) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -160,15 +182,21 @@ func encodeDiff(infos <-chan imageInfo, w *bytes.Buffer) (err error) {
 			check(binary.Write(w, endian, byte(0)))
 			return false
 		})
+		sb := selectedBlocks{im: im}
 		q.TraverseTopDown(func(t *qtree.Tree) bool {
 			if t.Info.Over {
-				ss := makeSubSection(im, t.Bounds())
-				check(jpeg.Encode(w, ss, nil))
-				draw.Draw(ref, ss.Bounds().Add(ss.offset), ss, image.Point{}, draw.Over)
+				for x := t.Bounds().Min.X; x < t.Bounds().Max.X; x += 8 {
+					for y := t.Bounds().Min.Y; y < t.Bounds().Max.Y; y += 8 {
+						sb.addBlock(x, y)
+						ss := makeSubSection(im, image.Rect(x, y, x+8, y+8))
+						draw.Draw(ref, ss.Bounds().Add(ss.offset), ss, image.Point{}, draw.Over)
+					}
+				}
 				return false
 			}
 			return t.Info.AboveOver
 		})
+		check(jpeg.Encode(w, &sb, nil))
 		if w.Len()-start > len(info.data) {
 			fmt.Printf("Using full image\n")
 			w.Truncate(start)
