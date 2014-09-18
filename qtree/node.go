@@ -5,7 +5,6 @@ import (
 )
 
 type params struct {
-	minDim int
 }
 
 type Info struct {
@@ -27,18 +26,40 @@ type Tree struct {
 	Info Info
 }
 
+func align8(n int) int {
+	return (n / 8) * 8
+}
+
 func (t *Tree) divide() {
-	if t.x1-t.x0 < t.params.minDim || t.y1-t.y0 < t.params.minDim {
+	midx := align8((t.x1 + t.x0) / 2)
+	midy := align8((t.y1 + t.y0) / 2)
+	splitx := midx != t.x0
+	splity := midy != t.y0
+	switch {
+	case !splitx && !splity:
 		return
+
+	case splitx && splity:
+		t.kids = []*Tree{
+			&Tree{params: t.params, x0: t.x0, y0: t.y0, x1: midx, y1: midy},
+			&Tree{params: t.params, x0: t.x0, y0: midy, x1: midx, y1: t.y1},
+			&Tree{params: t.params, x0: midx, y0: t.y0, x1: t.x1, y1: midy},
+			&Tree{params: t.params, x0: midx, y0: midy, x1: t.x1, y1: t.y1},
+		}
+
+	case splitx:
+		t.kids = []*Tree{
+			&Tree{params: t.params, x0: t.x0, y0: midy, x1: midx, y1: t.y1},
+			&Tree{params: t.params, x0: midx, y0: midy, x1: t.x1, y1: t.y1},
+		}
+
+	case splity:
+		t.kids = []*Tree{
+			&Tree{params: t.params, x0: midx, y0: t.y0, x1: t.x1, y1: midy},
+			&Tree{params: t.params, x0: midx, y0: midy, x1: t.x1, y1: t.y1},
+		}
 	}
-	midx := (t.x1 + t.x0) / 2
-	midy := (t.y1 + t.y0) / 2
-	t.kids = []*Tree{
-		&Tree{params: t.params, x0: t.x0, y0: t.y0, x1: midx, y1: midy},
-		&Tree{params: t.params, x0: midx, y0: t.y0, x1: t.x1, y1: midy},
-		&Tree{params: t.params, x0: t.x0, y0: midy, x1: midx, y1: t.y1},
-		&Tree{params: t.params, x0: midx, y0: midy, x1: t.x1, y1: t.y1},
-	}
+
 	for _, kid := range t.kids {
 		kid.divide()
 	}
@@ -74,8 +95,8 @@ func (t *Tree) TraverseBottomUp(visitor Visitor) {
 	visitor(t)
 }
 
-func MakeTree(dx, dy, minDim int) *Tree {
-	t := Tree{params: &params{minDim: minDim}, x0: 0, y0: 0, x1: dx, y1: dy}
+func MakeTree(dx, dy int) *Tree {
+	t := Tree{params: &params{}, x0: 0, y0: 0, x1: dx, y1: dy}
 	t.divide()
 	return &t
 }
