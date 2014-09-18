@@ -15,7 +15,10 @@ import (
 	"math"
 	"os"
 	"sort"
+	"sync"
 )
+
+var inputArgus = flag.String("inargus", "", "If set skip encoding and use this file")
 
 // File format
 // Dims
@@ -26,7 +29,7 @@ import (
 // for each changed cell:
 // a jpeg or png replacement
 
-const maxPowerPerPixel = 10.0
+const maxPowerPerPixel = 5.0
 
 func maxPowerForRegion(dx, dy int) float64 {
 	region := float64(dx * dy)
@@ -135,19 +138,108 @@ func (sb *selectedBlocks) addBlock(x, y int) {
 	sb.offsets = append(sb.offsets, image.Point{x, y})
 }
 func (sb *selectedBlocks) Bounds() image.Rectangle {
-	return image.Rect(0, 0, len(sb.offsets), 8)
+	return image.Rect(0, 0, 8*len(sb.offsets), 8)
 }
 func (sb *selectedBlocks) At(x, y int) color.Color {
 	if x < 0 || x >= len(sb.offsets)*8 {
 		return color.Black
 	}
 	offset := sb.offsets[x/8]
-	return sb.im.At(x+offset.X, y+offset.Y)
+	return sb.im.At(x%8+offset.X, y+offset.Y)
 }
 func (sb *selectedBlocks) ColorModel() color.Model {
 	return sb.im.ColorModel()
 }
 
+func readImage(r io.Reader) (image.Image, error) {
+	var length int32
+	check(binary.Read(r, endian, &length))
+	buf := make([]byte, int(length))
+	_, err := r.Read(buf)
+	if err != nil {
+		return nil, err
+	}
+	im, _, err := image.Decode(bytes.NewBuffer(buf))
+	return im, err
+}
+
+func writeImage(w io.Writer, im image.Image) error {
+	buf := bytes.NewBuffer(nil)
+	err := jpeg.Encode(buf, im, nil)
+	if err != nil {
+		return err
+	}
+	err = binary.Write(w, endian, int32(buf.Len()))
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(w, buf)
+	return err
+}
+
+func decodeDiff(r *bytes.Buffer, frames chan<- image.Image, m *sync.Mutex) (err error) {
+	defer close(frames)
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("Failure: %v", r)
+		}
+	}()
+	refSrc, err := readImage(r)
+	check(err)
+	ref := image.NewRGBA(refSrc.Bounds())
+	draw.Draw(ref, ref.Bounds(), refSrc, image.Point{}, draw.Over)
+	fmt.Printf("Loaded keyframe: %v\n", ref.Bounds())
+	m.Lock()
+	frames <- ref
+	m.Lock()
+	m.Unlock()
+	q := qtree.MakeTree(ref.Bounds().Dx(), ref.Bounds().Dy())
+	for {
+		var offsets []image.Point
+		q.TraverseTopDown(func(t *qtree.Tree) bool {
+			var b byte
+			check(binary.Read(r, endian, &b))
+			if b == 0 {
+				return false
+			}
+			if b == 1 {
+				return true
+			}
+			if b != 2 {
+				panic(fmt.Sprintf("Got %d, expected 2.", b))
+			}
+			for x := t.Bounds().Min.X; x < t.Bounds().Max.X; x += 8 {
+				for y := t.Bounds().Min.Y; y < t.Bounds().Max.Y; y += 8 {
+					offsets = append(offsets, image.Point{x, y})
+				}
+			}
+			return false
+		})
+		if len(offsets) > 0 {
+			var diff image.Image
+			diff, err := readImage(r)
+			check(err)
+			fmt.Printf("Offsets: %v\n", len(offsets))
+			fmt.Printf("Diff: %v\n", diff.Bounds())
+			if diff.Bounds().Dx()/8 != len(offsets) {
+				panic("balls")
+			}
+			for i, offset := range offsets {
+				draw.Draw(ref, image.Rect(offset.X, offset.Y, offset.X+8, offset.Y+8), diff, image.Point{i * 8, 0}, draw.Over)
+			}
+		}
+		m.Lock()
+		frames <- ref
+		m.Lock()
+		m.Unlock()
+	}
+	return nil
+}
+
+// Format:
+// a jpeg image
+// then quad-tree representations:
+//
 func encodeDiff(infos <-chan imageInfo, w *bytes.Buffer) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -156,7 +248,9 @@ func encodeDiff(infos <-chan imageInfo, w *bytes.Buffer) (err error) {
 	}()
 	var q *qtree.Tree
 	var ref draw.Image
-	count := 0
+	// count := 0
+	info := <-infos
+	check(writeImage(w, info.im))
 	for info := range infos {
 		im := info.im
 		fmt.Printf("%d\n", w.Len())
@@ -164,8 +258,6 @@ func encodeDiff(infos <-chan imageInfo, w *bytes.Buffer) (err error) {
 			ref = image.NewRGBA(im.Bounds())
 			draw.Draw(ref, ref.Bounds(), im, image.Point{}, draw.Over)
 			q = qtree.MakeTree(im.Bounds().Dx(), im.Bounds().Dy())
-			check(binary.Write(w, endian, int32(q.Bounds().Dx())))
-			check(binary.Write(w, endian, int32(q.Bounds().Dy())))
 			continue
 		}
 		start := w.Len()
@@ -196,58 +288,91 @@ func encodeDiff(infos <-chan imageInfo, w *bytes.Buffer) (err error) {
 			}
 			return t.Info.AboveOver
 		})
-		check(jpeg.Encode(w, &sb, nil))
+		if sb.Bounds().Dx() > 0 {
+			fmt.Printf("Write blocks: %v\n", sb.Bounds())
+			writeImage(w, &sb)
+		}
 		if w.Len()-start > len(info.data) {
 			fmt.Printf("Using full image\n")
 			w.Truncate(start)
+			// the 3 is a special value indicating that we sent a full jpeg
+			check(binary.Write(w, endian, byte(3)))
 			_, err := io.Copy(w, bytes.NewBuffer(info.data))
 			check(err)
 		}
-		out, _ := os.Create(fmt.Sprintf("ref-%02d.jpg", count))
-		count++
-		jpeg.Encode(out, ref, nil)
-		out.Close()
+		// out, _ := os.Create(fmt.Sprintf("ref-%02d.jpg", count))
+		// count++
+		// jpeg.Encode(out, ref, nil)
+		// out.Close()
 	}
 	return
 }
 
 func main() {
 	flag.Parse()
-	inputFilenames := flag.Args()
-	if len(inputFilenames) < 2 {
-		fmt.Printf("Must specify at least two files, you specified %v\n", inputFilenames)
-		os.Exit(1)
-	}
-	sort.Strings(inputFilenames)
-
-	ims := make(chan imageInfo)
-	go func() {
-		for _, filename := range inputFilenames {
-			data, err := ioutil.ReadFile(filename)
-			if err != nil {
-				fmt.Printf("Unable to read %q: %v\n", filename, err)
-				os.Exit(1)
-			}
-			im, _, err := image.Decode(bytes.NewBuffer(data))
-			if err != nil {
-				fmt.Printf("Unable to decode %q: %v\n", filename, err)
-				os.Exit(1)
-			}
-			ims <- imageInfo{im, data}
+	if *inputArgus == "" {
+		inputFilenames := flag.Args()
+		if len(inputFilenames) < 2 {
+			fmt.Printf("Must specify at least two files, you specified %v\n", inputFilenames)
+			os.Exit(1)
 		}
-		close(ims)
-	}()
-	var buf bytes.Buffer
-	err := encodeDiff(ims, &buf)
-	if err != nil {
-		fmt.Printf("Failed to encode argus: %v\n", err)
-		os.Exit(1)
+		sort.Strings(inputFilenames)
+
+		ims := make(chan imageInfo)
+		go func() {
+			for _, filename := range inputFilenames {
+				data, err := ioutil.ReadFile(filename)
+				if err != nil {
+					fmt.Printf("Unable to read %q: %v\n", filename, err)
+					os.Exit(1)
+				}
+				im, _, err := image.Decode(bytes.NewBuffer(data))
+				if err != nil {
+					fmt.Printf("Unable to decode %q: %v\n", filename, err)
+					os.Exit(1)
+				}
+				ims <- imageInfo{im, data}
+			}
+			close(ims)
+		}()
+		var buf bytes.Buffer
+		err := encodeDiff(ims, &buf)
+		if err != nil {
+			fmt.Printf("Failed to encode argus: %v\n", err)
+			os.Exit(1)
+		}
+		*inputArgus = "diff.argus"
+		argus, err := os.Create(*inputArgus)
+		if err != nil {
+			fmt.Printf("Failed to create output file: %v\n", err)
+			os.Exit(1)
+		}
+		io.Copy(argus, &buf)
+		argus.Close()
 	}
-	argus, err := os.Create("diff.argus")
-	if err != nil {
-		fmt.Printf("Failed to create output file: %v\n", err)
-		os.Exit(1)
+
+	{
+		data, err := ioutil.ReadFile(*inputArgus)
+		if err != nil {
+			panic(err)
+		}
+		buf := bytes.NewBuffer(data)
+		frames := make(chan image.Image)
+		var m sync.Mutex
+		go func() {
+			err := decodeDiff(buf, frames, &m)
+			if err != nil {
+				fmt.Sprintf("decode: %v", err)
+			}
+		}()
+		count := 0
+		for frame := range frames {
+			// This is racy
+			out, _ := os.Create(fmt.Sprintf("ref-%02d.jpg", count))
+			count++
+			jpeg.Encode(out, frame, nil)
+			out.Close()
+			m.Unlock()
+		}
 	}
-	defer argus.Close()
-	io.Copy(argus, &buf)
 }
