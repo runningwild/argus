@@ -43,11 +43,16 @@ func maxPowerForRegion(dx, dy int) float64 {
 func copyBlock(a, b *image.YCbCr, x0, y0, x1, y1 int) {
 	// fmt.Printf("Bounds: %v %v\n", a.Bounds(), b.Bounds())
 	// fmt.Printf("Bounds: %d %d %d %d", x0, y0, x1, y1)
-	for x := x0; x < x1; x++ {
-		for y := y0; y < y1; y++ {
+	for y := y0; y < y1; y++ {
+		for x := x0; x < x1; x++ {
 			yoff := a.YOffset(x, y)
-			coff := a.COffset(x, y)
 			a.Y[yoff] = b.Y[yoff]
+		}
+	}
+	width := a.YStride / a.CStride
+	for y := y0; y < y1; y++ {
+		for x := x0; x < x1; x += width {
+			coff := a.COffset(x, y)
 			a.Cb[coff] = b.Cb[coff]
 			a.Cr[coff] = b.Cr[coff]
 		}
@@ -55,17 +60,21 @@ func copyBlock(a, b *image.YCbCr, x0, y0, x1, y1 int) {
 }
 
 func power(a, b *image.YCbCr, x, y int) float64 {
-	// width := a.YStride / a.CStride
-	// var power float64
 	var p float64
 	for j := 0; j < 8; j++ {
+		yoff := a.YOffset(x, y+j)
 		for i := 0; i < 8; i++ {
-			yoff := a.YOffset(x+i, y+j)
+			ydiff := float64(a.Y[yoff+i]) - float64(b.Y[yoff+i])
+			p += ydiff * ydiff
+		}
+	}
+	width := a.YStride / a.CStride
+	for j := 0; j < 8; j++ {
+		for i := 0; i < 8; i += width {
 			coff := a.COffset(x+i, y+j)
-			ydiff := float64(a.Y[yoff]) - float64(b.Y[yoff])
 			cbdiff := float64(a.Cb[coff]) - float64(b.Cb[coff])
 			crdiff := float64(a.Cr[coff]) - float64(b.Cr[coff])
-			p += ydiff*ydiff + cbdiff*cbdiff + crdiff*crdiff
+			p += float64(width) * (cbdiff*cbdiff + crdiff*crdiff)
 		}
 	}
 	// ar, ag, ab, _ := a.RGBA()
@@ -215,9 +224,9 @@ func (tr tintRed) At(x, y int) color.Color {
 func decodeDiff(r *bytes.Buffer, frames chan<- image.Image, m *sync.Mutex) (err error) {
 	defer close(frames)
 	defer func() {
-		// if r := recover(); r != nil {
-		// 	err = fmt.Errorf("Failure: %v", r)
-		// }
+		if r := recover(); r != nil {
+			err = fmt.Errorf("Failure: %v", r)
+		}
 	}()
 	refSrc, err := readImage(r)
 	check(err)
@@ -284,9 +293,9 @@ func decodeDiff(r *bytes.Buffer, frames chan<- image.Image, m *sync.Mutex) (err 
 //
 func encodeDiff(ims <-chan *image.YCbCr, w *bytes.Buffer) (err error) {
 	defer func() {
-		// if r := recover(); r != nil {
-		// 	err = fmt.Errorf("Failure: %v", r)
-		// }
+		if r := recover(); r != nil {
+			err = fmt.Errorf("Failure: %v", r)
+		}
 	}()
 	var q *qtree.Tree
 	var ref *image.YCbCr
@@ -407,7 +416,7 @@ func main() {
 		io.Copy(argus, &buf)
 		argus.Close()
 	}
-	return
+	// return
 
 	{
 		data, err := ioutil.ReadFile(*inputArgus)
