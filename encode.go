@@ -10,16 +10,18 @@ import (
 	"image/color"
 	"image/draw"
 	"image/jpeg"
-	"image/png"
+	// "image/png"
 	"io"
 	"io/ioutil"
 	"math"
 	"os"
+	"runtime/pprof"
 	"sort"
 	"sync"
 )
 
 var inputArgus = flag.String("inargus", "", "If set skip encoding and use this file")
+var cpuprof = flag.String("prof.cpu", "", "write cpu profile to file")
 
 // File format
 // Dims
@@ -30,30 +32,57 @@ var inputArgus = flag.String("inargus", "", "If set skip encoding and use this f
 // for each changed cell:
 // a jpeg or png replacement
 
-const maxPowerPerPixel = 50.0
+const maxPowerPerPixel = 15.0
 
 func maxPowerForRegion(dx, dy int) float64 {
 	region := float64(dx * dy)
 	return maxPowerPerPixel * (math.Pow(region, 1.8))
 }
 
-func power(a, b color.Color) float64 {
-	var power float64
-	ar, ag, ab, _ := a.RGBA()
-	br, bg, bb, _ := b.RGBA()
-	ar = ar >> 8
-	ag = ag >> 8
-	ab = ab >> 8
-	br = br >> 8
-	bg = bg >> 8
-	bb = bb >> 8
-	power += float64((ar - br) * (ar - br))
-	power += float64((ag - bg) * (ag - bg))
-	power += float64((ab - bb) * (ab - bb))
-	return power
+// copies b onto a
+func copyBlock(a, b *image.YCbCr, x0, y0, x1, y1 int) {
+	// fmt.Printf("Bounds: %v %v\n", a.Bounds(), b.Bounds())
+	// fmt.Printf("Bounds: %d %d %d %d", x0, y0, x1, y1)
+	for x := x0; x < x1; x++ {
+		for y := y0; y < y1; y++ {
+			yoff := a.YOffset(x, y)
+			coff := a.COffset(x, y)
+			a.Y[yoff] = b.Y[yoff]
+			a.Cb[coff] = b.Cb[coff]
+			a.Cr[coff] = b.Cr[coff]
+		}
+	}
 }
 
-func doDiff(q *qtree.Tree, a, b image.Image) {
+func power(a, b *image.YCbCr, x, y int) float64 {
+	// width := a.YStride / a.CStride
+	// var power float64
+	var p float64
+	for j := 0; j < 8; j++ {
+		for i := 0; i < 8; i++ {
+			yoff := a.YOffset(x+i, y+j)
+			coff := a.COffset(x+i, y+j)
+			ydiff := float64(a.Y[yoff]) - float64(b.Y[yoff])
+			cbdiff := float64(a.Cb[coff]) - float64(b.Cb[coff])
+			crdiff := float64(a.Cr[coff]) - float64(b.Cr[coff])
+			p += ydiff*ydiff + cbdiff*cbdiff + crdiff*crdiff
+		}
+	}
+	// ar, ag, ab, _ := a.RGBA()
+	// br, bg, bb, _ := b.RGBA()
+	// ar = ar >> 8
+	// ag = ag >> 8
+	// ab = ab >> 8
+	// br = br >> 8
+	// bg = bg >> 8
+	// bb = bb >> 8
+	// p += float64((ar - br) * (ar - br))
+	// p += float64((ag - bg) * (ag - bg))
+	// p += float64((ab - bb) * (ab - bb))
+	return p
+}
+
+func doDiff(q *qtree.Tree, a, b *image.YCbCr) {
 	if !q.Bounds().Eq(a.Bounds()) || !a.Bounds().Eq(b.Bounds()) {
 		panic("Cannot diff two images with different bounds.")
 	}
@@ -63,11 +92,7 @@ func doDiff(q *qtree.Tree, a, b image.Image) {
 	q.TraverseBottomUp(func(t *qtree.Tree) bool {
 		t.Info = qtree.Info{}
 		if t.Leaf() {
-			for y := t.Bounds().Min.Y; y < t.Bounds().Max.Y; y++ {
-				for x := t.Bounds().Min.X; x < t.Bounds().Max.X; x++ {
-					t.Info.Power += power(a.At(x, y), b.At(x, y))
-				}
-			}
+			t.Info.Power += power(a, b, t.Bounds().Min.X, t.Bounds().Min.Y)
 		} else {
 			under := 0
 			for i := 0; i < t.NumChildren(); i++ {
@@ -147,7 +172,7 @@ func (sb *selectedBlocks) ColorModel() color.Model {
 	return sb.im.ColorModel()
 }
 
-func readImage(r io.Reader) (image.Image, error) {
+func readImage(r io.Reader) (*image.YCbCr, error) {
 	var length int32
 	check(binary.Read(r, endian, &length))
 	buf := make([]byte, int(length))
@@ -156,12 +181,16 @@ func readImage(r io.Reader) (image.Image, error) {
 		return nil, err
 	}
 	im, _, err := image.Decode(bytes.NewBuffer(buf))
-	return im, err
+	raw, ok := im.(*image.YCbCr)
+	if !ok {
+		return nil, fmt.Errorf("Unexpected type: %T", err)
+	}
+	return raw, err
 }
 
 func writeImage(w io.Writer, im image.Image) error {
 	buf := bytes.NewBuffer(nil)
-	err := png.Encode(buf, im)
+	err := jpeg.Encode(buf, im, nil)
 	if err != nil {
 		return err
 	}
@@ -186,9 +215,9 @@ func (tr tintRed) At(x, y int) color.Color {
 func decodeDiff(r *bytes.Buffer, frames chan<- image.Image, m *sync.Mutex) (err error) {
 	defer close(frames)
 	defer func() {
-		if r := recover(); r != nil {
-			err = fmt.Errorf("Failure: %v", r)
-		}
+		// if r := recover(); r != nil {
+		// 	err = fmt.Errorf("Failure: %v", r)
+		// }
 	}()
 	refSrc, err := readImage(r)
 	check(err)
@@ -242,7 +271,7 @@ func decodeDiff(r *bytes.Buffer, frames chan<- image.Image, m *sync.Mutex) (err 
 			}
 		}
 		m.Lock()
-		frames <- refDebug
+		frames <- ref
 		m.Lock()
 		m.Unlock()
 	}
@@ -253,14 +282,14 @@ func decodeDiff(r *bytes.Buffer, frames chan<- image.Image, m *sync.Mutex) (err 
 // a jpeg image
 // then quad-tree representations:
 //
-func encodeDiff(ims <-chan image.Image, w *bytes.Buffer) (err error) {
+func encodeDiff(ims <-chan *image.YCbCr, w *bytes.Buffer) (err error) {
 	defer func() {
-		if r := recover(); r != nil {
-			err = fmt.Errorf("Failure: %v", r)
-		}
+		// if r := recover(); r != nil {
+		// 	err = fmt.Errorf("Failure: %v", r)
+		// }
 	}()
 	var q *qtree.Tree
-	var ref draw.Image
+	var ref *image.YCbCr
 	// count := 0
 	im := <-ims
 	count := 0
@@ -269,8 +298,10 @@ func encodeDiff(ims <-chan image.Image, w *bytes.Buffer) (err error) {
 		count++
 		fmt.Printf("%d: %d\n", count, w.Len())
 		if ref == nil {
-			ref = image.NewRGBA(im.Bounds())
-			draw.Draw(ref, ref.Bounds(), im, image.Point{}, draw.Over)
+			ref = image.NewYCbCr(im.Bounds(), im.SubsampleRatio)
+			copy(ref.Y, im.Y)
+			copy(ref.Cb, im.Cb)
+			copy(ref.Cr, im.Cr)
 			q = qtree.MakeTree(im.Bounds().Dx(), im.Bounds().Dy())
 			continue
 		}
@@ -290,11 +321,20 @@ func encodeDiff(ims <-chan image.Image, w *bytes.Buffer) (err error) {
 		sb := selectedBlocks{im: im}
 		q.TraverseTopDown(func(t *qtree.Tree) bool {
 			if t.Info.Over {
+				maxx := t.Bounds().Max.X
+				if t.Bounds().Max.X > ref.Bounds().Max.X {
+					maxx = ref.Bounds().Max.X
+				}
+				maxy := t.Bounds().Max.Y
+				if t.Bounds().Max.Y > ref.Bounds().Max.Y {
+					maxy = ref.Bounds().Max.Y
+				}
+				copyBlock(ref, im, t.Bounds().Min.X, t.Bounds().Min.Y, maxx, maxy)
 				for x := t.Bounds().Min.X; x < t.Bounds().Max.X; x += 8 {
 					for y := t.Bounds().Min.Y; y < t.Bounds().Max.Y; y += 8 {
 						sb.addBlock(x, y)
-						ss := makeSubSection(im, image.Rect(x, y, x+8, y+8))
-						draw.Draw(ref, ss.Bounds().Add(ss.offset), ss, image.Point{}, draw.Over)
+						// ss := makeSubSection(im, image.Rect(x, y, x+8, y+8))
+						// draw.Draw(ref, ss.Bounds().Add(ss.offset), ss, image.Point{}, draw.Over)
 					}
 				}
 				return false
@@ -315,6 +355,14 @@ func encodeDiff(ims <-chan image.Image, w *bytes.Buffer) (err error) {
 
 func main() {
 	flag.Parse()
+	if *cpuprof != "" {
+		f, err := os.Create(*cpuprof)
+		if err != nil {
+			panic(err)
+		}
+		pprof.StartCPUProfile(f)
+		defer pprof.StopCPUProfile()
+	}
 	if *inputArgus == "" {
 		inputFilenames := flag.Args()
 		if len(inputFilenames) < 2 {
@@ -323,7 +371,7 @@ func main() {
 		}
 		sort.Strings(inputFilenames)
 
-		ims := make(chan image.Image)
+		ims := make(chan *image.YCbCr)
 		go func() {
 			for _, filename := range inputFilenames {
 				data, err := ioutil.ReadFile(filename)
@@ -336,7 +384,11 @@ func main() {
 					fmt.Printf("Unable to decode %q: %v\n", filename, err)
 					os.Exit(1)
 				}
-				ims <- im
+				raw, ok := im.(*image.YCbCr)
+				if !ok {
+					panic(fmt.Sprintf("Unable to something something %T", im))
+				}
+				ims <- raw
 			}
 			close(ims)
 		}()
@@ -355,6 +407,7 @@ func main() {
 		io.Copy(argus, &buf)
 		argus.Close()
 	}
+	return
 
 	{
 		data, err := ioutil.ReadFile(*inputArgus)
