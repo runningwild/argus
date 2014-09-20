@@ -12,7 +12,6 @@ import (
 	"image/jpeg"
 	// "image/png"
 	"io"
-	"io/ioutil"
 	"math"
 	"os"
 	"runtime/pprof"
@@ -22,9 +21,9 @@ import (
 
 var inputArgus = flag.String("inargus", "", "If set skip encoding and use this file")
 var cpuprof = flag.String("prof.cpu", "", "write cpu profile to file")
-var maxPowerPerPixel = flag.Float64("ppp", 50.0, "Maximum power-per-pixel")
-var maxFramesPerMoment = flag.Int("fpm", 50, "Maximum frames per moment")
-var maxBlocksPerMoment = flag.Int("bpm", 1000, "Maximum blocks per moment")
+var maxPowerPerPixel = flag.Float64("ppp", 45.0, "Maximum power-per-pixel")
+var maxFramesPerMoment = flag.Int("fpm", 100, "Maximum frames per moment")
+var maxBlocksPerMoment = flag.Int("bpm", 2000, "Maximum blocks per moment")
 
 // File format
 // Dims
@@ -155,6 +154,11 @@ func (sb *selectedBlocks) ColorModel() color.Model {
 	return color.RGBAModel
 }
 
+func (sb *selectedBlocks) clear() {
+	sb.blocks.Rect = image.Rect(0, 0, 8, 0)
+	sb.blocks.Pix = sb.blocks.Pix[0:0]
+}
+
 func (sb *selectedBlocks) addBlock(src *image.RGBA, x, y int) {
 	if sb.blocks == nil {
 		sb.blocks = image.NewRGBA(image.Rect(0, 0, 8, 0))
@@ -195,6 +199,9 @@ func loadImageFromFilenameOnto(filename string, dst *image.RGBA) error {
 func readImage(r io.Reader) (*image.RGBA, error) {
 	var length int32
 	check(binary.Read(r, endian, &length))
+	if length == 0 {
+		return image.NewRGBA(image.Rect(0, 0, 0, 0)), nil
+	}
 	buf := make([]byte, int(length))
 	_, err := r.Read(buf)
 	if err != nil {
@@ -214,6 +221,12 @@ func writeImage(w io.WriteSeeker, im image.Image) error {
 	err := binary.Write(w, endian, uint32(0))
 	if err != nil {
 		return err
+	}
+
+	// In the event that we tried to encode an empty image, just return, the length was already
+	// recorded as zero so we'll notice that there's nothing to do when we decode it.
+	if im.Bounds().Dx()*im.Bounds().Dy() == 0 {
+		return nil
 	}
 
 	// Seek to get the current offset
@@ -238,7 +251,6 @@ func writeImage(w io.WriteSeeker, im image.Image) error {
 		return err
 	}
 	_, err = w.Seek(endOfImage, 0)
-	fmt.Printf("Write (%v) -> %d\n", im.Bounds(), endOfImage-startOfImage)
 	return err
 }
 
@@ -252,7 +264,7 @@ func (tr tintRed) At(x, y int) color.Color {
 	return color.RGBA64{uint16(r), uint16(g), uint16(b), uint16(a)}
 }
 
-func decodeDiff(r *bytes.Buffer, frames chan<- image.Image, m *sync.Mutex) (err error) {
+func decodeDiff(r io.ReadSeeker, frames chan<- image.Image, m *sync.Mutex) (err error) {
 	defer close(frames)
 	defer func() {
 		// if r := recover(); r != nil {
@@ -272,10 +284,25 @@ func decodeDiff(r *bytes.Buffer, frames chan<- image.Image, m *sync.Mutex) (err 
 	m.Unlock()
 	q := qtree.MakeTree(ref.Bounds().Dx(), ref.Bounds().Dy())
 	count := 0
+	var momentFramesRemaining int32 = 0
+	var momentBlocks *image.RGBA
+	momentBlockCount := 0
+	// var momentEnd int64 = -1
 	for {
 		count++
 		var offsets []image.Point
 		fmt.Printf("Decoding frame %d\n", count)
+
+		if momentFramesRemaining == 0 {
+			check(binary.Read(r, endian, &momentFramesRemaining))
+			var err error
+			momentBlocks, err = readImage(r)
+			check(err)
+			momentBlockCount = 0
+			fmt.Printf("Starting moment: %d frames, %d blocks.\n", momentFramesRemaining, momentBlocks.Bounds().Dy()/8)
+		}
+		momentFramesRemaining--
+
 		q.TraverseTopDown(func(t *qtree.Tree) bool {
 			var b byte
 			check(binary.Read(r, endian, &b))
@@ -296,20 +323,16 @@ func decodeDiff(r *bytes.Buffer, frames chan<- image.Image, m *sync.Mutex) (err 
 			return false
 		})
 		if len(offsets) > 0 {
-			var diff image.Image
-			diff, err := readImage(r)
-			check(err)
 			fmt.Printf("Offsets: %v\n", len(offsets))
-			if diff.Bounds().Dy()/8 != len(offsets) {
-				panic("balls")
-			}
 			for i, offset := range offsets {
-				draw.Draw(ref, image.Rect(offset.X, offset.Y, offset.X+8, offset.Y+8), diff, image.Point{0, i * 8}, draw.Over)
+				draw.Draw(ref, image.Rect(offset.X, offset.Y, offset.X+8, offset.Y+8), momentBlocks, image.Point{0, (momentBlockCount + i) * 8}, draw.Over)
 			}
 			draw.Draw(refDebug, refDebug.Bounds(), ref, image.Point{}, draw.Over)
 			for i, offset := range offsets {
-				draw.Draw(refDebug, image.Rect(offset.X, offset.Y, offset.X+8, offset.Y+8), tintRed{diff}, image.Point{0, i * 8}, draw.Over)
+				draw.Draw(refDebug, image.Rect(offset.X, offset.Y, offset.X+8, offset.Y+8), momentBlocks, image.Point{0, (momentBlockCount + i) * 8}, draw.Over)
+				// draw.Draw(refDebug, image.Rect(offset.X, offset.Y, offset.X+8, offset.Y+8), tintRed{momentBlocks}, image.Point{0, (momentBlockCount + i) * 8}, draw.Over)
 			}
+			momentBlockCount += len(offsets)
 		}
 		m.Lock()
 		frames <- refDebug
@@ -336,30 +359,46 @@ func encodeDiff(initialFrame *image.RGBA, updater updateImage, w io.WriteSeeker)
 	draw.Draw(ref, ref.Bounds(), initialFrame, image.Point{}, draw.Over)
 	draw.Draw(cur, cur.Bounds(), initialFrame, image.Point{}, draw.Over)
 	q := qtree.MakeTree(ref.Bounds().Dx(), ref.Bounds().Dy())
-	count := 0
+	qbuf := bytes.NewBuffer(nil)
+	count := -1
 	check(writeImage(w, ref))
+	momentStartFrame := 0
+	var sb selectedBlocks
 	for {
+		count++
 		err := updater(cur)
-		if err != nil {
+		done := err != nil
+		if done ||
+			count-momentStartFrame > *maxFramesPerMoment ||
+			sb.Bounds().Dy()/8 > *maxBlocksPerMoment {
+			// Write the number of frames in this moment
+			// then the blocks
+			// then the qtree
+			fmt.Printf("Moment: %d frames, %d blocks.\n", count-momentStartFrame, sb.Bounds().Dy()/8)
+			check(binary.Write(w, endian, uint32(count-momentStartFrame)))
+			momentStartFrame = count
+			check(writeImage(w, &sb))
+			sb.clear()
+			_, err = io.Copy(w, qbuf)
+			check(err)
+			qbuf.Truncate(0)
+		}
+		if done {
 			return nil
 		}
-		count++
-		n, _ := w.Seek(0, 1)
-		fmt.Printf("%d: %d\n", count, n)
 		doDiff(q, ref, cur)
 		q.TraverseTopDown(func(t *qtree.Tree) bool {
 			if t.Info.Over {
-				check(binary.Write(w, endian, byte(2)))
+				check(binary.Write(qbuf, endian, byte(2)))
 				return false
 			}
 			if t.Info.AboveOver {
-				check(binary.Write(w, endian, byte(1)))
+				check(binary.Write(qbuf, endian, byte(1)))
 				return true
 			}
-			check(binary.Write(w, endian, byte(0)))
+			check(binary.Write(qbuf, endian, byte(0)))
 			return false
 		})
-		var sb selectedBlocks
 		q.TraverseTopDown(func(t *qtree.Tree) bool {
 			if t.Info.Over {
 				maxx := t.Bounds().Max.X
@@ -374,21 +413,12 @@ func encodeDiff(initialFrame *image.RGBA, updater updateImage, w io.WriteSeeker)
 				for x := t.Bounds().Min.X; x < t.Bounds().Max.X; x += 8 {
 					for y := t.Bounds().Min.Y; y < t.Bounds().Max.Y; y += 8 {
 						sb.addBlock(cur, x, y)
-						// ss := makeSubSection(im, image.Rect(x, y, x+8, y+8))
-						// draw.Draw(ref, ss.Bounds().Add(ss.offset), ss, image.Point{}, draw.Over)
 					}
 				}
 				return false
 			}
 			return t.Info.AboveOver
 		})
-		if sb.Bounds().Dy() > 0 {
-			writeImage(w, &sb)
-		}
-		// out, _ := os.Create(fmt.Sprintf("ref-%02d.jpg", count))
-		// count++
-		// jpeg.Encode(out, ref, nil)
-		// out.Close()
 	}
 	return
 }
@@ -444,19 +474,18 @@ func main() {
 		}
 		argus.Close()
 	}
-	return
 
 	{
 		fmt.Printf("Decoding...\n")
-		data, err := ioutil.ReadFile(*inputArgus)
+		f, err := os.Open(*inputArgus)
 		if err != nil {
 			panic(err)
 		}
-		buf := bytes.NewBuffer(data)
+		defer f.Close()
 		frames := make(chan image.Image)
 		var m sync.Mutex
 		go func() {
-			err := decodeDiff(buf, frames, &m)
+			err := decodeDiff(f, frames, &m)
 			if err != nil {
 				fmt.Sprintf("decode: %v", err)
 			}
