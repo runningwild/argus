@@ -154,6 +154,20 @@ func (sb *selectedBlocks) ColorModel() color.Model {
 	return sb.im.ColorModel()
 }
 
+func loadImageFromFilenameOnto(filename string, dst *image.RGBA) error {
+	f, err := os.Open(filename)
+	if err != nil {
+		return err
+	}
+	im, _, err := image.Decode(f)
+	f.Close()
+	if err != nil {
+		return err
+	}
+	draw.Draw(dst, dst.Bounds(), im, image.Point{}, draw.Over)
+	return nil
+}
+
 func readImage(r io.Reader) (*image.RGBA, error) {
 	var length int32
 	check(binary.Read(r, endian, &length))
@@ -285,29 +299,30 @@ func decodeDiff(r *bytes.Buffer, frames chan<- image.Image, m *sync.Mutex) (err 
 // a jpeg image
 // then quad-tree representations:
 //
-func encodeDiff(ims <-chan *image.RGBA, w io.WriteSeeker) (err error) {
+type updateImage func(*image.RGBA) error
+
+func encodeDiff(initialFrame *image.RGBA, updater updateImage, w io.WriteSeeker) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("Failure: %v", r)
 		}
 	}()
-	var q *qtree.Tree
-	var ref *image.RGBA
-	// count := 0
-	im := <-ims
+	ref := image.NewRGBA(initialFrame.Bounds())
+	cur := image.NewRGBA(initialFrame.Bounds())
+	draw.Draw(ref, ref.Bounds(), initialFrame, image.Point{}, draw.Over)
+	draw.Draw(cur, cur.Bounds(), initialFrame, image.Point{}, draw.Over)
+	q := qtree.MakeTree(ref.Bounds().Dx(), ref.Bounds().Dy())
 	count := 0
-	check(writeImage(w, im))
-	for im := range ims {
+	check(writeImage(w, ref))
+	for {
+		err := updater(cur)
+		if err != nil {
+			return nil
+		}
 		count++
 		n, _ := w.Seek(0, 1)
 		fmt.Printf("%d: %d\n", count, n)
-		if ref == nil {
-			ref = image.NewRGBA(im.Bounds())
-			copy(ref.Pix, im.Pix)
-			q = qtree.MakeTree(im.Bounds().Dx(), im.Bounds().Dy())
-			continue
-		}
-		doDiff(q, ref, im)
+		doDiff(q, ref, cur)
 		q.TraverseTopDown(func(t *qtree.Tree) bool {
 			if t.Info.Over {
 				check(binary.Write(w, endian, byte(2)))
@@ -320,7 +335,7 @@ func encodeDiff(ims <-chan *image.RGBA, w io.WriteSeeker) (err error) {
 			check(binary.Write(w, endian, byte(0)))
 			return false
 		})
-		sb := selectedBlocks{im: im}
+		sb := selectedBlocks{im: cur}
 		q.TraverseTopDown(func(t *qtree.Tree) bool {
 			if t.Info.Over {
 				maxx := t.Bounds().Max.X
@@ -331,7 +346,7 @@ func encodeDiff(ims <-chan *image.RGBA, w io.WriteSeeker) (err error) {
 				if t.Bounds().Max.Y > ref.Bounds().Max.Y {
 					maxy = ref.Bounds().Max.Y
 				}
-				copyBlock(ref, im, t.Bounds().Min.X, t.Bounds().Min.Y, maxx, maxy)
+				copyBlock(ref, cur, t.Bounds().Min.X, t.Bounds().Min.Y, maxx, maxy)
 				for x := t.Bounds().Min.X; x < t.Bounds().Max.X; x += 8 {
 					for y := t.Bounds().Min.Y; y < t.Bounds().Max.Y; y += 8 {
 						sb.addBlock(x, y)
@@ -372,39 +387,40 @@ func main() {
 		}
 		sort.Strings(inputFilenames)
 
-		ims := make(chan *image.RGBA, 10)
-		go func() {
-			for _, filename := range inputFilenames {
-				data, err := ioutil.ReadFile(filename)
-				if err != nil {
-					fmt.Printf("Unable to read %q: %v\n", filename, err)
-					os.Exit(1)
-				}
-				im, _, err := image.Decode(bytes.NewBuffer(data))
-				if err != nil {
-					fmt.Printf("Unable to decode %q: %v\n", filename, err)
-					os.Exit(1)
-				}
-				rgba := image.NewRGBA(im.Bounds())
-				draw.Draw(rgba, rgba.Bounds(), im, image.Point{}, draw.Over)
-				ims <- rgba
-			}
-			close(ims)
-		}()
 		*inputArgus = "diff.argus"
 		argus, err := os.Create(*inputArgus)
 		if err != nil {
 			fmt.Printf("Failed to create output file: %v\n", err)
 			os.Exit(1)
 		}
-		err = encodeDiff(ims, argus)
+		f, err := os.Open(inputFilenames[0])
+		if err != nil {
+			fmt.Printf("Unable to open file %q: %v\n", inputFilenames[0], err)
+			os.Exit(1)
+		}
+		rawFrame, _, err := image.Decode(f)
+		f.Close()
+		if err != nil {
+			fmt.Printf("Unable to decode image %q: %v\n", inputFilenames[0], err)
+			os.Exit(1)
+		}
+		initialImage := image.NewRGBA(rawFrame.Bounds())
+		draw.Draw(initialImage, initialImage.Bounds(), rawFrame, image.Point{}, draw.Over)
+		updater := func(im *image.RGBA) error {
+			inputFilenames = inputFilenames[1:]
+			if len(inputFilenames) == 0 {
+				return fmt.Errorf("Ran out of images")
+			}
+			return loadImageFromFilenameOnto(inputFilenames[0], im)
+		}
+		err = encodeDiff(initialImage, updater, argus)
 		if err != nil {
 			fmt.Printf("Failed to encode argus: %v\n", err)
 			os.Exit(1)
 		}
 		argus.Close()
 	}
-	// return
+	return
 
 	{
 		fmt.Printf("Decoding...\n")
