@@ -32,7 +32,7 @@ var cpuprof = flag.String("prof.cpu", "", "write cpu profile to file")
 // for each changed cell:
 // a jpeg or png replacement
 
-const maxPowerPerPixel = 15.0
+const maxPowerPerPixel = 35.0
 
 func maxPowerForRegion(dx, dy int) float64 {
 	region := float64(dx * dy)
@@ -40,58 +40,31 @@ func maxPowerForRegion(dx, dy int) float64 {
 }
 
 // copies b onto a
-func copyBlock(a, b *image.YCbCr, x0, y0, x1, y1 int) {
-	// fmt.Printf("Bounds: %v %v\n", a.Bounds(), b.Bounds())
-	// fmt.Printf("Bounds: %d %d %d %d", x0, y0, x1, y1)
+func copyBlock(a, b *image.RGBA, x0, y0, x1, y1 int) {
 	for y := y0; y < y1; y++ {
-		for x := x0; x < x1; x++ {
-			yoff := a.YOffset(x, y)
-			a.Y[yoff] = b.Y[yoff]
-		}
-	}
-	width := a.YStride / a.CStride
-	for y := y0; y < y1; y++ {
-		for x := x0; x < x1; x += width {
-			coff := a.COffset(x, y)
-			a.Cb[coff] = b.Cb[coff]
-			a.Cr[coff] = b.Cr[coff]
-		}
+		start := a.PixOffset(x0, y)
+		end := a.PixOffset(x1, y)
+		copy(a.Pix[start:end], b.Pix[start:end])
 	}
 }
 
-func power(a, b *image.YCbCr, x, y int) float64 {
+func power(a, b *image.RGBA, x0, y0 int) float64 {
 	var p float64
-	for j := 0; j < 8; j++ {
-		yoff := a.YOffset(x, y+j)
-		for i := 0; i < 8; i++ {
-			ydiff := float64(a.Y[yoff+i]) - float64(b.Y[yoff+i])
-			p += ydiff * ydiff
+	for y := y0; y < y0+8; y++ {
+		for x := x0; x < x0+8; x++ {
+			offset := a.PixOffset(x, y)
+			rdiff := float64(a.Pix[offset+0]) - float64(b.Pix[offset+0])
+			gdiff := float64(a.Pix[offset+1]) - float64(b.Pix[offset+1])
+			bdiff := float64(a.Pix[offset+2]) - float64(b.Pix[offset+2])
+			p += rdiff * rdiff
+			p += gdiff * gdiff
+			p += bdiff * bdiff
 		}
 	}
-	width := a.YStride / a.CStride
-	for j := 0; j < 8; j++ {
-		for i := 0; i < 8; i += width {
-			coff := a.COffset(x+i, y+j)
-			cbdiff := float64(a.Cb[coff]) - float64(b.Cb[coff])
-			crdiff := float64(a.Cr[coff]) - float64(b.Cr[coff])
-			p += float64(width) * (cbdiff*cbdiff + crdiff*crdiff)
-		}
-	}
-	// ar, ag, ab, _ := a.RGBA()
-	// br, bg, bb, _ := b.RGBA()
-	// ar = ar >> 8
-	// ag = ag >> 8
-	// ab = ab >> 8
-	// br = br >> 8
-	// bg = bg >> 8
-	// bb = bb >> 8
-	// p += float64((ar - br) * (ar - br))
-	// p += float64((ag - bg) * (ag - bg))
-	// p += float64((ab - bb) * (ab - bb))
 	return p
 }
 
-func doDiff(q *qtree.Tree, a, b *image.YCbCr) {
+func doDiff(q *qtree.Tree, a, b *image.RGBA) {
 	if !q.Bounds().Eq(a.Bounds()) || !a.Bounds().Eq(b.Bounds()) {
 		panic("Cannot diff two images with different bounds.")
 	}
@@ -181,7 +154,7 @@ func (sb *selectedBlocks) ColorModel() color.Model {
 	return sb.im.ColorModel()
 }
 
-func readImage(r io.Reader) (*image.YCbCr, error) {
+func readImage(r io.Reader) (*image.RGBA, error) {
 	var length int32
 	check(binary.Read(r, endian, &length))
 	buf := make([]byte, int(length))
@@ -190,24 +163,44 @@ func readImage(r io.Reader) (*image.YCbCr, error) {
 		return nil, err
 	}
 	im, _, err := image.Decode(bytes.NewBuffer(buf))
-	raw, ok := im.(*image.YCbCr)
-	if !ok {
-		return nil, fmt.Errorf("Unexpected type: %T", err)
+	if err != nil {
+		return nil, err
 	}
-	return raw, err
+	rgba := image.NewRGBA(im.Bounds())
+	draw.Draw(rgba, rgba.Bounds(), im, image.Point{}, draw.Over)
+	return rgba, err
 }
 
-func writeImage(w io.Writer, im image.Image) error {
-	buf := bytes.NewBuffer(nil)
-	err := jpeg.Encode(buf, im, nil)
+func writeImage(w io.WriteSeeker, im image.Image) error {
+	// Placeholder for the length of the jpeg that we'll write in afterwards.
+	err := binary.Write(w, endian, uint32(0))
 	if err != nil {
 		return err
 	}
-	err = binary.Write(w, endian, int32(buf.Len()))
+
+	// Seek to get the current offset
+	startOfImage, err := w.Seek(0, 1)
 	if err != nil {
 		return err
 	}
-	_, err = io.Copy(w, buf)
+	err = jpeg.Encode(w, im, nil)
+	if err != nil {
+		return err
+	}
+	endOfImage, err := w.Seek(0, 1)
+	if err != nil {
+		return err
+	}
+	_, err = w.Seek(startOfImage-4, 0)
+	if err != nil {
+		return err
+	}
+	err = binary.Write(w, endian, uint32(endOfImage-startOfImage))
+	if err != nil {
+		return err
+	}
+	_, err = w.Seek(endOfImage, 0)
+	fmt.Printf("Write (%v) -> %d\n", im.Bounds(), endOfImage-startOfImage)
 	return err
 }
 
@@ -230,6 +223,7 @@ func decodeDiff(r *bytes.Buffer, frames chan<- image.Image, m *sync.Mutex) (err 
 	}()
 	refSrc, err := readImage(r)
 	check(err)
+	fmt.Printf("Decodingnggngn")
 	ref := image.NewRGBA(refSrc.Bounds())
 	refDebug := image.NewRGBA(refSrc.Bounds())
 	draw.Draw(ref, ref.Bounds(), refSrc, image.Point{}, draw.Over)
@@ -291,26 +285,25 @@ func decodeDiff(r *bytes.Buffer, frames chan<- image.Image, m *sync.Mutex) (err 
 // a jpeg image
 // then quad-tree representations:
 //
-func encodeDiff(ims <-chan *image.YCbCr, w *bytes.Buffer) (err error) {
+func encodeDiff(ims <-chan *image.RGBA, w io.WriteSeeker) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("Failure: %v", r)
 		}
 	}()
 	var q *qtree.Tree
-	var ref *image.YCbCr
+	var ref *image.RGBA
 	// count := 0
 	im := <-ims
 	count := 0
 	check(writeImage(w, im))
 	for im := range ims {
 		count++
-		fmt.Printf("%d: %d\n", count, w.Len())
+		n, _ := w.Seek(0, 1)
+		fmt.Printf("%d: %d\n", count, n)
 		if ref == nil {
-			ref = image.NewYCbCr(im.Bounds(), im.SubsampleRatio)
-			copy(ref.Y, im.Y)
-			copy(ref.Cb, im.Cb)
-			copy(ref.Cr, im.Cr)
+			ref = image.NewRGBA(im.Bounds())
+			copy(ref.Pix, im.Pix)
 			q = qtree.MakeTree(im.Bounds().Dx(), im.Bounds().Dy())
 			continue
 		}
@@ -351,7 +344,6 @@ func encodeDiff(ims <-chan *image.YCbCr, w *bytes.Buffer) (err error) {
 			return t.Info.AboveOver
 		})
 		if sb.Bounds().Dx() > 0 {
-			fmt.Printf("Write blocks: %v\n", sb.Bounds())
 			writeImage(w, &sb)
 		}
 		// out, _ := os.Create(fmt.Sprintf("ref-%02d.jpg", count))
@@ -380,7 +372,7 @@ func main() {
 		}
 		sort.Strings(inputFilenames)
 
-		ims := make(chan *image.YCbCr)
+		ims := make(chan *image.RGBA, 10)
 		go func() {
 			for _, filename := range inputFilenames {
 				data, err := ioutil.ReadFile(filename)
@@ -393,32 +385,29 @@ func main() {
 					fmt.Printf("Unable to decode %q: %v\n", filename, err)
 					os.Exit(1)
 				}
-				raw, ok := im.(*image.YCbCr)
-				if !ok {
-					panic(fmt.Sprintf("Unable to something something %T", im))
-				}
-				ims <- raw
+				rgba := image.NewRGBA(im.Bounds())
+				draw.Draw(rgba, rgba.Bounds(), im, image.Point{}, draw.Over)
+				ims <- rgba
 			}
 			close(ims)
 		}()
-		var buf bytes.Buffer
-		err := encodeDiff(ims, &buf)
-		if err != nil {
-			fmt.Printf("Failed to encode argus: %v\n", err)
-			os.Exit(1)
-		}
 		*inputArgus = "diff.argus"
 		argus, err := os.Create(*inputArgus)
 		if err != nil {
 			fmt.Printf("Failed to create output file: %v\n", err)
 			os.Exit(1)
 		}
-		io.Copy(argus, &buf)
+		err = encodeDiff(ims, argus)
+		if err != nil {
+			fmt.Printf("Failed to encode argus: %v\n", err)
+			os.Exit(1)
+		}
 		argus.Close()
 	}
 	// return
 
 	{
+		fmt.Printf("Decoding...\n")
 		data, err := ioutil.ReadFile(*inputArgus)
 		if err != nil {
 			panic(err)
