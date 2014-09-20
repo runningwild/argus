@@ -22,6 +22,9 @@ import (
 
 var inputArgus = flag.String("inargus", "", "If set skip encoding and use this file")
 var cpuprof = flag.String("prof.cpu", "", "write cpu profile to file")
+var maxPowerPerPixel = flag.Float64("ppp", 50.0, "Maximum power-per-pixel")
+var maxFramesPerMoment = flag.Int("fpm", 50, "Maximum frames per moment")
+var maxBlocksPerMoment = flag.Int("fpm", 1000, "Maximum blocks per moment")
 
 // File format
 // Dims
@@ -32,11 +35,9 @@ var cpuprof = flag.String("prof.cpu", "", "write cpu profile to file")
 // for each changed cell:
 // a jpeg or png replacement
 
-const maxPowerPerPixel = 35.0
-
 func maxPowerForRegion(dx, dy int) float64 {
 	region := float64(dx * dy)
-	return maxPowerPerPixel * (math.Pow(region, 1.8))
+	return *maxPowerPerPixel * (math.Pow(region, 1.8))
 }
 
 // copies b onto a
@@ -288,7 +289,7 @@ func decodeDiff(r *bytes.Buffer, frames chan<- image.Image, m *sync.Mutex) (err 
 			}
 		}
 		m.Lock()
-		frames <- ref
+		frames <- refDebug
 		m.Lock()
 		m.Unlock()
 	}
@@ -420,7 +421,6 @@ func main() {
 		}
 		argus.Close()
 	}
-	return
 
 	{
 		fmt.Printf("Decoding...\n")
