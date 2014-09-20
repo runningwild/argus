@@ -24,7 +24,7 @@ var inputArgus = flag.String("inargus", "", "If set skip encoding and use this f
 var cpuprof = flag.String("prof.cpu", "", "write cpu profile to file")
 var maxPowerPerPixel = flag.Float64("ppp", 50.0, "Maximum power-per-pixel")
 var maxFramesPerMoment = flag.Int("fpm", 50, "Maximum frames per moment")
-var maxBlocksPerMoment = flag.Int("fpm", 1000, "Maximum blocks per moment")
+var maxBlocksPerMoment = flag.Int("bpm", 1000, "Maximum blocks per moment")
 
 // File format
 // Dims
@@ -134,25 +134,48 @@ func (ss *subSection) ColorModel() color.Model {
 }
 
 type selectedBlocks struct {
-	im      image.Image
-	offsets []image.Point
+	blocks *image.RGBA
 }
 
-func (sb *selectedBlocks) addBlock(x, y int) {
-	sb.offsets = append(sb.offsets, image.Point{x, y})
-}
-func (sb *selectedBlocks) Bounds() image.Rectangle {
-	return image.Rect(0, 0, 8*len(sb.offsets), 8)
-}
 func (sb *selectedBlocks) At(x, y int) color.Color {
-	if x < 0 || x >= len(sb.offsets)*8 {
+	if sb.blocks == nil {
 		return color.Black
 	}
-	offset := sb.offsets[x/8]
-	return sb.im.At(x%8+offset.X, y+offset.Y)
+	return sb.blocks.At(x, y)
 }
+
+func (sb *selectedBlocks) Bounds() image.Rectangle {
+	if sb.blocks == nil {
+		return image.Rect(0, 0, 0, 0)
+	}
+	return sb.blocks.Bounds()
+}
+
 func (sb *selectedBlocks) ColorModel() color.Model {
-	return sb.im.ColorModel()
+	return color.RGBAModel
+}
+
+func (sb *selectedBlocks) addBlock(src *image.RGBA, x, y int) {
+	if sb.blocks == nil {
+		sb.blocks = image.NewRGBA(image.Rect(0, 0, 8, 0))
+	}
+	blocky := sb.blocks.Rect.Dy()
+	sb.blocks.Rect = image.Rect(0, 0, 8, blocky+8)
+	if cap(sb.blocks.Pix) >= len(sb.blocks.Pix)+64*4 {
+		sb.blocks.Pix = sb.blocks.Pix[0 : len(sb.blocks.Pix)+64*4]
+	} else {
+		pix := make([]byte, len(sb.blocks.Pix)*2+64*4)
+		copy(pix, sb.blocks.Pix)
+		sb.blocks.Pix = pix[0 : len(sb.blocks.Pix)+64*4]
+	}
+	for i := 0; i < 8; i++ {
+		dstOffset := sb.blocks.PixOffset(0, blocky+i)
+		srcOffset := src.PixOffset(x, y+i)
+		if srcOffset >= len(src.Pix) {
+			return
+		}
+		copy(sb.blocks.Pix[dstOffset:dstOffset+32], src.Pix[srcOffset:])
+	}
 }
 
 func loadImageFromFilenameOnto(filename string, dst *image.RGBA) error {
@@ -232,9 +255,9 @@ func (tr tintRed) At(x, y int) color.Color {
 func decodeDiff(r *bytes.Buffer, frames chan<- image.Image, m *sync.Mutex) (err error) {
 	defer close(frames)
 	defer func() {
-		if r := recover(); r != nil {
-			err = fmt.Errorf("Failure: %v", r)
-		}
+		// if r := recover(); r != nil {
+		// 	err = fmt.Errorf("Failure: %v", r)
+		// }
 	}()
 	refSrc, err := readImage(r)
 	check(err)
@@ -277,15 +300,15 @@ func decodeDiff(r *bytes.Buffer, frames chan<- image.Image, m *sync.Mutex) (err 
 			diff, err := readImage(r)
 			check(err)
 			fmt.Printf("Offsets: %v\n", len(offsets))
-			if diff.Bounds().Dx()/8 != len(offsets) {
+			if diff.Bounds().Dy()/8 != len(offsets) {
 				panic("balls")
 			}
 			for i, offset := range offsets {
-				draw.Draw(ref, image.Rect(offset.X, offset.Y, offset.X+8, offset.Y+8), diff, image.Point{i * 8, 0}, draw.Over)
+				draw.Draw(ref, image.Rect(offset.X, offset.Y, offset.X+8, offset.Y+8), diff, image.Point{0, i * 8}, draw.Over)
 			}
 			draw.Draw(refDebug, refDebug.Bounds(), ref, image.Point{}, draw.Over)
 			for i, offset := range offsets {
-				draw.Draw(refDebug, image.Rect(offset.X, offset.Y, offset.X+8, offset.Y+8), tintRed{diff}, image.Point{i * 8, 0}, draw.Over)
+				draw.Draw(refDebug, image.Rect(offset.X, offset.Y, offset.X+8, offset.Y+8), tintRed{diff}, image.Point{0, i * 8}, draw.Over)
 			}
 		}
 		m.Lock()
@@ -304,9 +327,9 @@ type updateImage func(*image.RGBA) error
 
 func encodeDiff(initialFrame *image.RGBA, updater updateImage, w io.WriteSeeker) (err error) {
 	defer func() {
-		if r := recover(); r != nil {
-			err = fmt.Errorf("Failure: %v", r)
-		}
+		// if r := recover(); r != nil {
+		// 	err = fmt.Errorf("Failure: %v", r)
+		// }
 	}()
 	ref := image.NewRGBA(initialFrame.Bounds())
 	cur := image.NewRGBA(initialFrame.Bounds())
@@ -336,7 +359,7 @@ func encodeDiff(initialFrame *image.RGBA, updater updateImage, w io.WriteSeeker)
 			check(binary.Write(w, endian, byte(0)))
 			return false
 		})
-		sb := selectedBlocks{im: cur}
+		var sb selectedBlocks
 		q.TraverseTopDown(func(t *qtree.Tree) bool {
 			if t.Info.Over {
 				maxx := t.Bounds().Max.X
@@ -350,7 +373,7 @@ func encodeDiff(initialFrame *image.RGBA, updater updateImage, w io.WriteSeeker)
 				copyBlock(ref, cur, t.Bounds().Min.X, t.Bounds().Min.Y, maxx, maxy)
 				for x := t.Bounds().Min.X; x < t.Bounds().Max.X; x += 8 {
 					for y := t.Bounds().Min.Y; y < t.Bounds().Max.Y; y += 8 {
-						sb.addBlock(x, y)
+						sb.addBlock(cur, x, y)
 						// ss := makeSubSection(im, image.Rect(x, y, x+8, y+8))
 						// draw.Draw(ref, ss.Bounds().Add(ss.offset), ss, image.Point{}, draw.Over)
 					}
@@ -359,7 +382,7 @@ func encodeDiff(initialFrame *image.RGBA, updater updateImage, w io.WriteSeeker)
 			}
 			return t.Info.AboveOver
 		})
-		if sb.Bounds().Dx() > 0 {
+		if sb.Bounds().Dy() > 0 {
 			writeImage(w, &sb)
 		}
 		// out, _ := os.Create(fmt.Sprintf("ref-%02d.jpg", count))
@@ -421,6 +444,7 @@ func main() {
 		}
 		argus.Close()
 	}
+	return
 
 	{
 		fmt.Printf("Decoding...\n")
