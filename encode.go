@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/runningwild/argus/qtree"
+	"github.com/runningwild/argus/utils"
 	"image"
 	"image/color"
 	"image/draw"
@@ -48,24 +49,6 @@ func copyBlock(a, b *image.RGBA, x0, y0, x1, y1 int) {
 	}
 }
 
-func power(a, b *image.RGBA, x0, y0 int) (pow float64, over bool) {
-	var p float64
-	for y := y0; y < y0+8; y++ {
-		for x := x0; x < x0+8; x++ {
-			offset := a.PixOffset(x, y)
-			rdiff := float64(a.Pix[offset+0]) - float64(b.Pix[offset+0])
-			gdiff := float64(a.Pix[offset+1]) - float64(b.Pix[offset+1])
-			bdiff := float64(a.Pix[offset+2]) - float64(b.Pix[offset+2])
-			add := rdiff*rdiff + gdiff*gdiff + bdiff*bdiff
-			if add > *maxPowerPerPixel {
-				// return add, true
-			}
-			p += add
-		}
-	}
-	return p, false
-}
-
 func doDiff(q *qtree.Tree, a, b *image.RGBA) {
 	if !q.Bounds().Eq(a.Bounds()) || !a.Bounds().Eq(b.Bounds()) {
 		panic("Cannot diff two images with different bounds.")
@@ -76,7 +59,7 @@ func doDiff(q *qtree.Tree, a, b *image.RGBA) {
 	q.TraverseBottomUp(func(t *qtree.Tree) bool {
 		t.Info = qtree.Info{}
 		if t.Leaf() {
-			power, over := power(a, b, t.Bounds().Min.X, t.Bounds().Min.Y)
+			power, over := utils.Power(a, b, t.Bounds().Min.X, t.Bounds().Min.Y, *maxPowerPerPixel)
 			t.Info.Power += power
 			t.Info.Over = over
 		} else {
