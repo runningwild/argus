@@ -16,7 +16,6 @@ import (
 	"os"
 	"runtime/pprof"
 	"sort"
-	"sync"
 )
 
 var inputArgus = flag.String("inargus", "", "If set skip encoding and use this file")
@@ -264,8 +263,7 @@ func (tr tintRed) At(x, y int) color.Color {
 	return color.RGBA64{uint16(r), uint16(g), uint16(b), uint16(a)}
 }
 
-func decodeDiff(r io.ReadSeeker, frames chan<- image.Image, m *sync.Mutex) (err error) {
-	defer close(frames)
+func decodeDiff(r io.ReadSeeker, updater updateImage) (err error) {
 	defer func() {
 		// if r := recover(); r != nil {
 		// 	err = fmt.Errorf("Failure: %v", r)
@@ -273,15 +271,11 @@ func decodeDiff(r io.ReadSeeker, frames chan<- image.Image, m *sync.Mutex) (err 
 	}()
 	refSrc, err := readImage(r)
 	check(err)
-	fmt.Printf("Decodingnggngn")
 	ref := image.NewRGBA(refSrc.Bounds())
 	refDebug := image.NewRGBA(refSrc.Bounds())
 	draw.Draw(ref, ref.Bounds(), refSrc, image.Point{}, draw.Over)
 	fmt.Printf("Loaded keyframe: %v\n", ref.Bounds())
-	m.Lock()
-	frames <- ref
-	m.Lock()
-	m.Unlock()
+	updater(ref)
 	q := qtree.MakeTree(ref.Bounds().Dx(), ref.Bounds().Dy())
 	count := 0
 	var momentFramesRemaining int32 = 0
@@ -329,15 +323,11 @@ func decodeDiff(r io.ReadSeeker, frames chan<- image.Image, m *sync.Mutex) (err 
 			}
 			draw.Draw(refDebug, refDebug.Bounds(), ref, image.Point{}, draw.Over)
 			for i, offset := range offsets {
-				draw.Draw(refDebug, image.Rect(offset.X, offset.Y, offset.X+8, offset.Y+8), momentBlocks, image.Point{0, (momentBlockCount + i) * 8}, draw.Over)
-				// draw.Draw(refDebug, image.Rect(offset.X, offset.Y, offset.X+8, offset.Y+8), tintRed{momentBlocks}, image.Point{0, (momentBlockCount + i) * 8}, draw.Over)
+				draw.Draw(refDebug, image.Rect(offset.X, offset.Y, offset.X+8, offset.Y+8), tintRed{momentBlocks}, image.Point{0, (momentBlockCount + i) * 8}, draw.Over)
 			}
 			momentBlockCount += len(offsets)
 		}
-		m.Lock()
-		frames <- refDebug
-		m.Lock()
-		m.Unlock()
+		updater(ref)
 	}
 	return nil
 }
@@ -474,6 +464,7 @@ func main() {
 		}
 		argus.Close()
 	}
+	return
 
 	{
 		fmt.Printf("Decoding...\n")
@@ -482,27 +473,22 @@ func main() {
 			panic(err)
 		}
 		defer f.Close()
-		frames := make(chan image.Image)
-		var m sync.Mutex
-		go func() {
-			err := decodeDiff(f, frames, &m)
-			if err != nil {
-				fmt.Sprintf("decode: %v", err)
-			}
-		}()
+
 		count := 0
-		for frame := range frames {
+		update := func(frame *image.RGBA) error {
 			count++
-			fmt.Printf("Frame %d\n", count)
-			// This is racy
 			out, err := os.Create(fmt.Sprintf("ref-%04d.jpg", count))
 			if err != nil {
 				fmt.Printf("Error: %v\n", err)
-				continue
+				return nil
 			}
 			jpeg.Encode(out, frame, nil)
-			out.Close()
-			m.Unlock()
+			return nil
+		}
+
+		err = decodeDiff(f, update)
+		if err != nil {
+			fmt.Printf("Error on decoding: %v\n", err)
 		}
 	}
 }
