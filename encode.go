@@ -22,7 +22,7 @@ import (
 
 var inputArgus = flag.String("inargus", "", "If set skip encoding and use this file")
 var cpuprof = flag.String("prof.cpu", "", "write cpu profile to file")
-var maxPowerPerPixel = flag.Float64("ppp", 200.0, "Maximum power-per-pixel")
+var maxPowerPerPixel = flag.Uint64("ppp", 200, "Maximum power-per-pixel")
 var maxFramesPerMoment = flag.Int("fpm", 100, "Maximum frames per moment")
 var maxBlocksPerMoment = flag.Int("bpm", 2000, "Maximum blocks per moment")
 
@@ -35,9 +35,9 @@ var maxBlocksPerMoment = flag.Int("bpm", 2000, "Maximum blocks per moment")
 // for each changed cell:
 // a jpeg or png replacement
 
-func maxPowerForRegion(dx, dy int) float64 {
+func maxPowerForRegion(dx, dy int) uint64 {
 	region := float64(dx * dy)
-	return *maxPowerPerPixel * (math.Pow(region, 1.4))
+	return uint64(float64(*maxPowerPerPixel) * (math.Pow(region, 1.4)))
 }
 
 // copies b onto a

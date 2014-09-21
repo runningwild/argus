@@ -10,7 +10,7 @@ type params struct {
 type Info struct {
 	Over      bool
 	AboveOver bool
-	Power     float64
+	Power     uint64
 }
 
 // NEXT: construct a quad tree for the dims of the image.  The tree will be re-used for each frame.
