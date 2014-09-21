@@ -12,6 +12,7 @@ import (
 	"image/jpeg"
 	// "image/png"
 	"io"
+	"io/ioutil"
 	"math"
 	"os"
 	"runtime/pprof"
@@ -20,7 +21,7 @@ import (
 
 var inputArgus = flag.String("inargus", "", "If set skip encoding and use this file")
 var cpuprof = flag.String("prof.cpu", "", "write cpu profile to file")
-var maxPowerPerPixel = flag.Float64("ppp", 45.0, "Maximum power-per-pixel")
+var maxPowerPerPixel = flag.Float64("ppp", 200.0, "Maximum power-per-pixel")
 var maxFramesPerMoment = flag.Int("fpm", 100, "Maximum frames per moment")
 var maxBlocksPerMoment = flag.Int("bpm", 2000, "Maximum blocks per moment")
 
@@ -35,7 +36,7 @@ var maxBlocksPerMoment = flag.Int("bpm", 2000, "Maximum blocks per moment")
 
 func maxPowerForRegion(dx, dy int) float64 {
 	region := float64(dx * dy)
-	return *maxPowerPerPixel * (math.Pow(region, 1.8))
+	return *maxPowerPerPixel * (math.Pow(region, 1.4))
 }
 
 // copies b onto a
@@ -47,7 +48,7 @@ func copyBlock(a, b *image.RGBA, x0, y0, x1, y1 int) {
 	}
 }
 
-func power(a, b *image.RGBA, x0, y0 int) float64 {
+func power(a, b *image.RGBA, x0, y0 int) (pow float64, over bool) {
 	var p float64
 	for y := y0; y < y0+8; y++ {
 		for x := x0; x < x0+8; x++ {
@@ -55,12 +56,14 @@ func power(a, b *image.RGBA, x0, y0 int) float64 {
 			rdiff := float64(a.Pix[offset+0]) - float64(b.Pix[offset+0])
 			gdiff := float64(a.Pix[offset+1]) - float64(b.Pix[offset+1])
 			bdiff := float64(a.Pix[offset+2]) - float64(b.Pix[offset+2])
-			p += rdiff * rdiff
-			p += gdiff * gdiff
-			p += bdiff * bdiff
+			add := rdiff*rdiff + gdiff*gdiff + bdiff*bdiff
+			if add > *maxPowerPerPixel {
+				// return add, true
+			}
+			p += add
 		}
 	}
-	return p
+	return p, false
 }
 
 func doDiff(q *qtree.Tree, a, b *image.RGBA) {
@@ -73,7 +76,9 @@ func doDiff(q *qtree.Tree, a, b *image.RGBA) {
 	q.TraverseBottomUp(func(t *qtree.Tree) bool {
 		t.Info = qtree.Info{}
 		if t.Leaf() {
-			t.Info.Power += power(a, b, t.Bounds().Min.X, t.Bounds().Min.Y)
+			power, over := power(a, b, t.Bounds().Min.X, t.Bounds().Min.Y)
+			t.Info.Power += power
+			t.Info.Over = over
 		} else {
 			under := 0
 			for i := 0; i < t.NumChildren(); i++ {
@@ -154,6 +159,9 @@ func (sb *selectedBlocks) ColorModel() color.Model {
 }
 
 func (sb *selectedBlocks) clear() {
+	if sb.blocks == nil {
+		return
+	}
 	sb.blocks.Rect = image.Rect(0, 0, 8, 0)
 	sb.blocks.Pix = sb.blocks.Pix[0:0]
 }
@@ -413,6 +421,65 @@ func encodeDiff(initialFrame *image.RGBA, updater updateImage, w io.WriteSeeker)
 	return
 }
 
+type rawRGB struct {
+	dx, dy int
+	data   []byte
+}
+
+func (r *rawRGB) At(x, y int) color.Color {
+	if !(image.Point{x, y}).In(r.Bounds()) {
+		return color.Black
+	}
+	index := x + y*r.dx
+	return color.RGBA{r.data[index], r.data[index+1], r.data[index+2], 255}
+}
+func (r *rawRGB) Set(x, y int, c color.Color) {
+	if !(image.Point{x, y}).In(r.Bounds()) {
+		return
+	}
+	cr, cg, cb, _ := c.RGBA()
+	index := (x + y*r.dx) * 3
+	r.data[index+0] = (byte)(cr >> 8)
+	r.data[index+1] = (byte)(cg >> 8)
+	r.data[index+2] = (byte)(cb >> 8)
+}
+func (r *rawRGB) Bounds() image.Rectangle {
+	return image.Rect(0, 0, r.dx, r.dy)
+}
+func (r *rawRGB) ColorModel() color.Model {
+	return color.RGBAModel
+}
+
+func loadUncompressedRGB(filename string, dx, dy int) (*rawRGB, error) {
+	data, err := ioutil.ReadFile(filename)
+	if err != nil {
+		return nil, fmt.Errorf("Unable to read %q: %v", filename, err)
+	}
+	if len(data) != dx*dy*3 {
+		return nil, fmt.Errorf("Unexpected file length")
+	}
+	return &rawRGB{dx: dx, dy: dy, data: data}, nil
+}
+
+func loadImage(filename string, guessDx, guessDy int) (*rawRGB, error) {
+	f, err := os.Open(filename)
+	if err != nil {
+		return nil, err
+	}
+	im, _, err := image.Decode(f)
+	f.Close()
+	if err != nil {
+		return loadUncompressedRGB(filename, guessDx, guessDy)
+	}
+	raw := &rawRGB{
+		dx:   im.Bounds().Dx(),
+		dy:   im.Bounds().Dy(),
+		data: make([]byte, im.Bounds().Dx()*im.Bounds().Dy()*3),
+	}
+	draw.Draw(raw, raw.Bounds(), im, image.Point{}, draw.Over)
+	return raw, nil
+}
+
 func main() {
 	flag.Parse()
 	if *cpuprof != "" {
@@ -437,25 +504,28 @@ func main() {
 			fmt.Printf("Failed to create output file: %v\n", err)
 			os.Exit(1)
 		}
-		f, err := os.Open(inputFilenames[0])
+		rawFrame, err := loadImage(inputFilenames[0], 640, 480)
 		if err != nil {
 			fmt.Printf("Unable to open file %q: %v\n", inputFilenames[0], err)
 			os.Exit(1)
 		}
-		rawFrame, _, err := image.Decode(f)
-		f.Close()
-		if err != nil {
-			fmt.Printf("Unable to decode image %q: %v\n", inputFilenames[0], err)
-			os.Exit(1)
-		}
 		initialImage := image.NewRGBA(rawFrame.Bounds())
-		draw.Draw(initialImage, initialImage.Bounds(), rawFrame, image.Point{}, draw.Over)
+		draw.Draw(initialImage, rawFrame.Bounds(), rawFrame, image.Point{}, draw.Over)
 		updater := func(im *image.RGBA) error {
 			inputFilenames = inputFilenames[1:]
 			if len(inputFilenames) == 0 {
 				return fmt.Errorf("Ran out of images")
 			}
-			return loadImageFromFilenameOnto(inputFilenames[0], im)
+			rawFrame, err := loadImage(inputFilenames[0], 640, 480)
+			if err != nil {
+				return err
+			}
+			for i := 0; i < len(im.Pix)/4; i++ {
+				im.Pix[i*4+0] = rawFrame.data[i*3+0]
+				im.Pix[i*4+1] = rawFrame.data[i*3+1]
+				im.Pix[i*4+2] = rawFrame.data[i*3+2]
+			}
+			return nil
 		}
 		err = encodeDiff(initialImage, updater, argus)
 		if err != nil {
@@ -464,7 +534,6 @@ func main() {
 		}
 		argus.Close()
 	}
-	return
 
 	{
 		fmt.Printf("Decoding...\n")
