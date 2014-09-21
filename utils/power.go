@@ -19,5 +19,5 @@ func Power(a, b *image.RGBA, x0, y0 int, mppp float64) (pow float64, over bool) 
 			p += add
 		}
 	}
-	return p, p > mppp
+	return p, p > mppp*64
 }
