@@ -1,8 +1,7 @@
+// +build !arm
 package utils
 
-func PowerLine(aRgba, bRgba []byte) uint64
-
-func PowerLineNormal(aRgba, bRgba []byte) uint64 {
+func PowerLine(aRgba, bRgba []byte) uint64 {
 	var power uint64 = 0.0
 	var diff int64
 
@@ -57,4 +56,3 @@ func PowerLineNormal(aRgba, bRgba []byte) uint64 {
 
 	return power
 }
-
