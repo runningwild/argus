@@ -1,4 +1,6 @@
 // +build !arm
+
+// Default implementation of PowerLine for architectures that don't have an assumbly version.
 package utils
 
 func PowerLine(aRgba, bRgba []byte) uint64 {
