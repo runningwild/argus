@@ -1,4 +1,4 @@
-	TEXT	·PowerLine+0(SB),16,$36-32
+TEXT	·PowerLine+0(SB),16,$36-32
 	MOVW	$·aRgba+0(FP),R0
 	MOVW	0(R0), R0		// R0 holds the address of the first element in array A
 
