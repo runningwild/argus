@@ -2,6 +2,7 @@ package qtree
 
 import (
 	"image"
+	"math"
 )
 
 type params struct {
@@ -23,6 +24,8 @@ type Tree struct {
 	// kids in clockwise order starting from the top-left
 	kids []*Tree
 
+	maxPower uint64
+
 	Info Info
 }
 
@@ -30,7 +33,10 @@ func align8(n int) int {
 	return (n / 8) * 8
 }
 
-func (t *Tree) divide() {
+func (t *Tree) divide(maxPowerPerPixel uint64) {
+	region := float64(t.Bounds().Dx() * t.Bounds().Dy())
+	t.maxPower = uint64(float64(maxPowerPerPixel) * (math.Pow(region, 1.4)))
+
 	midx := align8((t.x1 + t.x0) / 2)
 	midy := align8((t.y1 + t.y0) / 2)
 	splitx := midx != t.x0
@@ -61,7 +67,7 @@ func (t *Tree) divide() {
 	}
 
 	for _, kid := range t.kids {
-		kid.divide()
+		kid.divide(maxPowerPerPixel)
 	}
 }
 
@@ -90,6 +96,9 @@ func (t *Tree) TraverseTopDown(visitor Visitor) {
 		kid.TraverseTopDown(visitor)
 	}
 }
+func (t *Tree) MaxPower() uint64 {
+	return t.maxPower
+}
 
 func (t *Tree) TraverseBottomUp(visitor Visitor) {
 	for _, kid := range t.kids {
@@ -98,8 +107,8 @@ func (t *Tree) TraverseBottomUp(visitor Visitor) {
 	visitor(t)
 }
 
-func MakeTree(dx, dy int) *Tree {
+func MakeTree(dx, dy int, maxPowerPerPixel uint64) *Tree {
 	t := Tree{params: &params{}, x0: 0, y0: 0, x1: dx, y1: dy}
-	t.divide()
+	t.divide(maxPowerPerPixel)
 	return &t
 }

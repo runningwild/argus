@@ -11,10 +11,8 @@ import (
 	"image/color"
 	"image/draw"
 	"image/jpeg"
-	// "image/png"
 	"io"
 	"io/ioutil"
-	"math"
 	"os"
 	"runtime/pprof"
 	"sort"
@@ -34,11 +32,6 @@ var maxBlocksPerMoment = flag.Int("bpm", 2000, "Maximum blocks per moment")
 // quad-tree representation of changed cells
 // for each changed cell:
 // a jpeg or png replacement
-
-func maxPowerForRegion(dx, dy int) uint64 {
-	region := float64(dx * dy)
-	return uint64(float64(*maxPowerPerPixel) * (math.Pow(region, 1.4)))
-}
 
 // copies b onto a
 func copyBlock(a, b *image.RGBA, x0, y0, x1, y1 int) {
@@ -78,7 +71,7 @@ func doDiff(q *qtree.Tree, a, b *image.RGBA) {
 				t.Info.Over = true
 			}
 		}
-		if t.Info.Power > maxPowerForRegion(t.Bounds().Dx(), t.Bounds().Dy()) {
+		if t.Info.Power > t.MaxPower() {
 			t.Info.Over = true
 		}
 		if t.Info.Over {
@@ -267,7 +260,7 @@ func decodeDiff(r io.ReadSeeker, updater updateImage) (err error) {
 	draw.Draw(ref, ref.Bounds(), refSrc, image.Point{}, draw.Over)
 	fmt.Printf("Loaded keyframe: %v\n", ref.Bounds())
 	updater(ref)
-	q := qtree.MakeTree(ref.Bounds().Dx(), ref.Bounds().Dy())
+	q := qtree.MakeTree(ref.Bounds().Dx(), ref.Bounds().Dy(), *maxPowerPerPixel)
 	count := 0
 	var momentFramesRemaining int32 = 0
 	var momentBlocks *image.RGBA
@@ -339,7 +332,7 @@ func encodeDiff(initialFrame *image.RGBA, updater updateImage, w io.WriteSeeker)
 	cur := image.NewRGBA(initialFrame.Bounds())
 	draw.Draw(ref, ref.Bounds(), initialFrame, image.Point{}, draw.Over)
 	draw.Draw(cur, cur.Bounds(), initialFrame, image.Point{}, draw.Over)
-	q := qtree.MakeTree(ref.Bounds().Dx(), ref.Bounds().Dy())
+	q := qtree.MakeTree(ref.Bounds().Dx(), ref.Bounds().Dy(), *maxPowerPerPixel)
 	qbuf := bytes.NewBuffer(nil)
 	count := -1
 	check(writeImage(w, ref))
