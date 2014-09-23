@@ -25,6 +25,12 @@ TEXT	·PowerLine+0(SB),16,$36-32
         MUL     R2, R2, R2
         ADD     R2, R8, R8
 
+        MOVB    3(R0), R2
+        MOVB    3(R1), R3
+        SUB     R3, R2, R2
+        MUL     R2, R2, R2
+        ADD     R2, R8, R8
+
         MOVB    4(R0), R2
         MOVB    4(R1), R3
         SUB     R3, R2, R2
@@ -39,6 +45,12 @@ TEXT	·PowerLine+0(SB),16,$36-32
 
         MOVB    6(R0), R2
         MOVB    6(R1), R3
+        SUB     R3, R2, R2
+        MUL     R2, R2, R2
+        ADD     R2, R8, R8
+
+        MOVB    7(R0), R2
+        MOVB    7(R1), R3
         SUB     R3, R2, R2
         MUL     R2, R2, R2
         ADD     R2, R8, R8
@@ -61,6 +73,12 @@ TEXT	·PowerLine+0(SB),16,$36-32
         MUL     R2, R2, R2
         ADD     R2, R8, R8
 
+        MOVB    11(R0), R2
+        MOVB    11(R1), R3
+        SUB     R3, R2, R2
+        MUL     R2, R2, R2
+        ADD     R2, R8, R8
+
         MOVB    12(R0), R2
         MOVB    12(R1), R3
         SUB     R3, R2, R2
@@ -75,6 +93,12 @@ TEXT	·PowerLine+0(SB),16,$36-32
 
         MOVB    14(R0), R2
         MOVB    14(R1), R3
+        SUB     R3, R2, R2
+        MUL     R2, R2, R2
+        ADD     R2, R8, R8
+
+        MOVB    15(R0), R2
+        MOVB    15(R1), R3
         SUB     R3, R2, R2
         MUL     R2, R2, R2
         ADD     R2, R8, R8
@@ -97,6 +121,12 @@ TEXT	·PowerLine+0(SB),16,$36-32
         MUL     R2, R2, R2
         ADD     R2, R8, R8
 
+        MOVB    19(R0), R2
+        MOVB    19(R1), R3
+        SUB     R3, R2, R2
+        MUL     R2, R2, R2
+        ADD     R2, R8, R8
+
         MOVB    20(R0), R2
         MOVB    20(R1), R3
         SUB     R3, R2, R2
@@ -115,38 +145,8 @@ TEXT	·PowerLine+0(SB),16,$36-32
         MUL     R2, R2, R2
         ADD     R2, R8, R8
 
-        MOVB    24(R0), R2
-        MOVB    24(R1), R3
-        SUB     R3, R2, R2
-        MUL     R2, R2, R2
-        ADD     R2, R8, R8
-
-        MOVB    25(R0), R2
-        MOVB    25(R1), R3
-        SUB     R3, R2, R2
-        MUL     R2, R2, R2
-        ADD     R2, R8, R8
-
-        MOVB    26(R0), R2
-        MOVB    26(R1), R3
-        SUB     R3, R2, R2
-        MUL     R2, R2, R2
-        ADD     R2, R8, R8
-
-        MOVB    28(R0), R2
-        MOVB    28(R1), R3
-        SUB     R3, R2, R2
-        MUL     R2, R2, R2
-        ADD     R2, R8, R8
-
-        MOVB    29(R0), R2
-        MOVB    29(R1), R3
-        SUB     R3, R2, R2
-        MUL     R2, R2, R2
-        ADD     R2, R8, R8
-
-        MOVB    30(R0), R2
-        MOVB    30(R1), R3
+        MOVB    23(R0), R2
+        MOVB    23(R1), R3
         SUB     R3, R2, R2
         MUL     R2, R2, R2
         ADD     R2, R8, R8

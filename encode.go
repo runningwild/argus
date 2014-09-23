@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/runningwild/argus/qtree"
+	"github.com/runningwild/argus/rgb"
 	"github.com/runningwild/argus/utils"
 	"image"
 	"image/color"
@@ -34,7 +35,7 @@ var maxBlocksPerMoment = flag.Int("bpm", 2000, "Maximum blocks per moment")
 // a jpeg or png replacement
 
 // copies b onto a
-func copyBlock(a, b *image.RGBA, x0, y0, x1, y1 int) {
+func copyBlock(a, b *rgb.Image, x0, y0, x1, y1 int) {
 	for y := y0; y < y1; y++ {
 		start := a.PixOffset(x0, y)
 		end := a.PixOffset(x1, y)
@@ -42,7 +43,7 @@ func copyBlock(a, b *image.RGBA, x0, y0, x1, y1 int) {
 	}
 }
 
-func doDiff(q *qtree.Tree, a, b *image.RGBA) {
+func doDiff(q *qtree.Tree, a, b *rgb.Image) {
 	if !q.Bounds().Eq(a.Bounds()) || !a.Bounds().Eq(b.Bounds()) {
 		panic("Cannot diff two images with different bounds.")
 	}
@@ -113,7 +114,7 @@ func (ss *subSection) ColorModel() color.Model {
 }
 
 type selectedBlocks struct {
-	blocks *image.RGBA
+	blocks *rgb.Image
 }
 
 func (sb *selectedBlocks) At(x, y int) color.Color {
@@ -142,18 +143,18 @@ func (sb *selectedBlocks) clear() {
 	sb.blocks.Pix = sb.blocks.Pix[0:0]
 }
 
-func (sb *selectedBlocks) addBlock(src *image.RGBA, x, y int) {
+func (sb *selectedBlocks) addBlock(src *rgb.Image, x, y int) {
 	if sb.blocks == nil {
-		sb.blocks = image.NewRGBA(image.Rect(0, 0, 8, 0))
+		sb.blocks = rgb.Make(image.Rect(0, 0, 8, 0))
 	}
 	blocky := sb.blocks.Rect.Dy()
 	sb.blocks.Rect = image.Rect(0, 0, 8, blocky+8)
-	if cap(sb.blocks.Pix) >= len(sb.blocks.Pix)+64*4 {
-		sb.blocks.Pix = sb.blocks.Pix[0 : len(sb.blocks.Pix)+64*4]
+	if cap(sb.blocks.Pix) >= len(sb.blocks.Pix)+64*3 {
+		sb.blocks.Pix = sb.blocks.Pix[0 : len(sb.blocks.Pix)+64*3]
 	} else {
-		pix := make([]byte, len(sb.blocks.Pix)*2+64*4)
+		pix := make([]byte, len(sb.blocks.Pix)*2+64*3)
 		copy(pix, sb.blocks.Pix)
-		sb.blocks.Pix = pix[0 : len(sb.blocks.Pix)+64*4]
+		sb.blocks.Pix = pix[0 : len(sb.blocks.Pix)+64*3]
 	}
 	for i := 0; i < 8; i++ {
 		dstOffset := sb.blocks.PixOffset(0, blocky+i)
@@ -161,29 +162,15 @@ func (sb *selectedBlocks) addBlock(src *image.RGBA, x, y int) {
 		if srcOffset >= len(src.Pix) {
 			return
 		}
-		copy(sb.blocks.Pix[dstOffset:dstOffset+32], src.Pix[srcOffset:])
+		copy(sb.blocks.Pix[dstOffset:dstOffset+24], src.Pix[srcOffset:])
 	}
 }
 
-func loadImageFromFilenameOnto(filename string, dst *image.RGBA) error {
-	f, err := os.Open(filename)
-	if err != nil {
-		return err
-	}
-	im, _, err := image.Decode(f)
-	f.Close()
-	if err != nil {
-		return err
-	}
-	draw.Draw(dst, dst.Bounds(), im, image.Point{}, draw.Over)
-	return nil
-}
-
-func readImage(r io.Reader) (*image.RGBA, error) {
+func readImage(r io.Reader) (*rgb.Image, error) {
 	var length int32
 	check(binary.Read(r, endian, &length))
 	if length == 0 {
-		return image.NewRGBA(image.Rect(0, 0, 0, 0)), nil
+		return rgb.Make(image.Rect(0, 0, 0, 0)), nil
 	}
 	buf := make([]byte, int(length))
 	_, err := r.Read(buf)
@@ -194,7 +181,7 @@ func readImage(r io.Reader) (*image.RGBA, error) {
 	if err != nil {
 		return nil, err
 	}
-	rgba := image.NewRGBA(im.Bounds())
+	rgba := rgb.Make(im.Bounds())
 	draw.Draw(rgba, rgba.Bounds(), im, image.Point{}, draw.Over)
 	return rgba, err
 }
@@ -249,21 +236,21 @@ func (tr tintRed) At(x, y int) color.Color {
 
 func decodeDiff(r io.ReadSeeker, updater updateImage) (err error) {
 	defer func() {
-		// if r := recover(); r != nil {
-		// 	err = fmt.Errorf("Failure: %v", r)
-		// }
+		if r := recover(); r != nil {
+			err = fmt.Errorf("Failure: %v", r)
+		}
 	}()
 	refSrc, err := readImage(r)
 	check(err)
-	ref := image.NewRGBA(refSrc.Bounds())
-	refDebug := image.NewRGBA(refSrc.Bounds())
+	ref := rgb.Make(refSrc.Bounds())
+	refDebug := rgb.Make(refSrc.Bounds())
 	draw.Draw(ref, ref.Bounds(), refSrc, image.Point{}, draw.Over)
 	fmt.Printf("Loaded keyframe: %v\n", ref.Bounds())
 	updater(ref)
 	q := qtree.MakeTree(ref.Bounds().Dx(), ref.Bounds().Dy(), *maxPowerPerPixel)
 	count := 0
 	var momentFramesRemaining int32 = 0
-	var momentBlocks *image.RGBA
+	var momentBlocks *rgb.Image
 	momentBlockCount := 0
 	// var momentEnd int64 = -1
 	for {
@@ -316,20 +303,16 @@ func decodeDiff(r io.ReadSeeker, updater updateImage) (err error) {
 	return nil
 }
 
-// Format:
-// a jpeg image
-// then quad-tree representations:
-//
-type updateImage func(*image.RGBA) error
+type updateImage func(*rgb.Image) error
 
-func encodeDiff(initialFrame *image.RGBA, updater updateImage, w io.WriteSeeker) (err error) {
+func encodeDiff(initialFrame *rgb.Image, updater updateImage, w io.WriteSeeker) (err error) {
 	defer func() {
 		// if r := recover(); r != nil {
 		// 	err = fmt.Errorf("Failure: %v", r)
 		// }
 	}()
-	ref := image.NewRGBA(initialFrame.Bounds())
-	cur := image.NewRGBA(initialFrame.Bounds())
+	ref := rgb.Make(initialFrame.Bounds())
+	cur := rgb.Make(initialFrame.Bounds())
 	draw.Draw(ref, ref.Bounds(), initialFrame, image.Point{}, draw.Over)
 	draw.Draw(cur, cur.Bounds(), initialFrame, image.Point{}, draw.Over)
 	q := qtree.MakeTree(ref.Bounds().Dx(), ref.Bounds().Dy(), *maxPowerPerPixel)
@@ -397,47 +380,26 @@ func encodeDiff(initialFrame *image.RGBA, updater updateImage, w io.WriteSeeker)
 	return
 }
 
-type rawRGB struct {
-	dx, dy int
-	data   []byte
-}
-
-func (r *rawRGB) At(x, y int) color.Color {
-	if !(image.Point{x, y}).In(r.Bounds()) {
-		return color.Black
-	}
-	index := x + y*r.dx
-	return color.RGBA{r.data[index], r.data[index+1], r.data[index+2], 255}
-}
-func (r *rawRGB) Set(x, y int, c color.Color) {
-	if !(image.Point{x, y}).In(r.Bounds()) {
-		return
-	}
-	cr, cg, cb, _ := c.RGBA()
-	index := (x + y*r.dx) * 3
-	r.data[index+0] = (byte)(cr >> 8)
-	r.data[index+1] = (byte)(cg >> 8)
-	r.data[index+2] = (byte)(cb >> 8)
-}
-func (r *rawRGB) Bounds() image.Rectangle {
-	return image.Rect(0, 0, r.dx, r.dy)
-}
-func (r *rawRGB) ColorModel() color.Model {
-	return color.RGBAModel
-}
-
-func loadUncompressedRGB(filename string, dx, dy int) (*rawRGB, error) {
+func loadUncompressedRGBOnto(filename string, dx, dy int, im *rgb.Image) error {
 	data, err := ioutil.ReadFile(filename)
 	if err != nil {
-		return nil, fmt.Errorf("Unable to read %q: %v", filename, err)
+		return fmt.Errorf("Unable to read %q: %v", filename, err)
 	}
-	if len(data) != dx*dy*3 {
-		return nil, fmt.Errorf("Unexpected file length")
+	if len(data) != im.Bounds().Dx()*im.Bounds().Dy()*3 {
+		return fmt.Errorf("Unexpected file length")
 	}
-	return &rawRGB{dx: dx, dy: dy, data: data}, nil
+	im.Pix = data
+	return nil
 }
 
-func loadImage(filename string, guessDx, guessDy int) (*rawRGB, error) {
+func loadImage(filename string, guessDx, guessDy int) (*rgb.Image, error) {
+	raw := rgb.Make(image.Rect(0, 0, guessDx, guessDy))
+	err := loadUncompressedRGBOnto(filename, guessDx, guessDy, raw)
+	if err == nil {
+		return raw, nil
+	}
+
+	// The rest of this is just a convenience if we want to run this on jpegs
 	f, err := os.Open(filename)
 	if err != nil {
 		return nil, err
@@ -445,15 +407,30 @@ func loadImage(filename string, guessDx, guessDy int) (*rawRGB, error) {
 	im, _, err := image.Decode(f)
 	f.Close()
 	if err != nil {
-		return loadUncompressedRGB(filename, guessDx, guessDy)
-	}
-	raw := &rawRGB{
-		dx:   im.Bounds().Dx(),
-		dy:   im.Bounds().Dy(),
-		data: make([]byte, im.Bounds().Dx()*im.Bounds().Dy()*3),
+		return nil, err
 	}
 	draw.Draw(raw, raw.Bounds(), im, image.Point{}, draw.Over)
 	return raw, nil
+}
+
+func loadImageFromFilenameOnto(filename string, dst *rgb.Image) error {
+	err := loadUncompressedRGBOnto(filename, dst.Bounds().Dx(), dst.Bounds().Dy(), dst)
+	if err == nil {
+		return nil
+	}
+
+	// The rest of this is just a convenience if we want to run this on jpegs
+	f, err := os.Open(filename)
+	if err != nil {
+		return err
+	}
+	im, _, err := image.Decode(f)
+	f.Close()
+	if err != nil {
+		return err
+	}
+	draw.Draw(dst, dst.Bounds(), im, image.Point{}, draw.Over)
+	return nil
 }
 
 func main() {
@@ -485,22 +462,19 @@ func main() {
 			fmt.Printf("Unable to open file %q: %v\n", inputFilenames[0], err)
 			os.Exit(1)
 		}
-		initialImage := image.NewRGBA(rawFrame.Bounds())
+		initialImage := rgb.Make(rawFrame.Bounds())
 		draw.Draw(initialImage, rawFrame.Bounds(), rawFrame, image.Point{}, draw.Over)
-		updater := func(im *image.RGBA) error {
+		updater := func(im *rgb.Image) error {
 			inputFilenames = inputFilenames[1:]
 			if len(inputFilenames) == 0 {
 				return fmt.Errorf("Ran out of images")
 			}
-			rawFrame, err := loadImage(inputFilenames[0], 640, 480)
-			if err != nil {
-				return err
-			}
-			for i := 0; i < len(im.Pix)/4; i++ {
-				im.Pix[i*4+0] = rawFrame.data[i*3+0]
-				im.Pix[i*4+1] = rawFrame.data[i*3+1]
-				im.Pix[i*4+2] = rawFrame.data[i*3+2]
-			}
+			loadImageFromFilenameOnto(inputFilenames[0], im)
+			// rawFrame, err := loadImage(inputFilenames[0], 640, 480)
+			// if err != nil {
+			// 	return err
+			// }
+			// im.Pix = rawFrame.Pix
 			return nil
 		}
 		err = encodeDiff(initialImage, updater, argus)
@@ -520,7 +494,7 @@ func main() {
 		defer f.Close()
 
 		count := 0
-		update := func(frame *image.RGBA) error {
+		update := func(frame *rgb.Image) error {
 			count++
 			out, err := os.Create(fmt.Sprintf("ref-%04d.jpg", count))
 			if err != nil {
