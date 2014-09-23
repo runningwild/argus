@@ -1,14 +1,15 @@
 package utils_test
 
 import (
+	"github.com/runningwild/argus/rgb"
 	"github.com/runningwild/argus/utils"
 	"image"
 	"testing"
 )
 
 func TestPower(t *testing.T) {
-	imgA := image.NewRGBA(image.Rect(0, 0, 10, 10))
-	imgB := image.NewRGBA(image.Rect(0, 0, 10, 10))
+	imgA := rgb.Make(image.Rect(0, 0, 10, 10))
+	imgB := rgb.Make(image.Rect(0, 0, 10, 10))
 
 	pow, over := utils.Power(imgA, imgB, 0, 0, 1)
 	if pow != 0 {
@@ -70,8 +71,8 @@ func TestPower(t *testing.T) {
 }
 
 func BenchmarkPower(b *testing.B) {
-	imgA := image.NewRGBA(image.Rect(0, 0, 8, 8))
-	imgB := image.NewRGBA(image.Rect(0, 0, 8, 8))
+	imgA := rgb.Make(image.Rect(0, 0, 8, 8))
+	imgB := rgb.Make(image.Rect(0, 0, 8, 8))
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		utils.Power(imgA, imgB, 0, 0, 100)
