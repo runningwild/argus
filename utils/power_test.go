@@ -7,6 +7,19 @@ import (
 	"testing"
 )
 
+func TestPowerLine(t *testing.T) {
+	a := make([]byte, 24)
+	b := make([]byte, 24)
+	for i := 0; i < 24; i++ {
+		a[i] = (byte)(i*13 + 17)
+		b[i] = (byte)(i*253 + 11)
+	}
+	pow := utils.PowerLine(a, b)
+	if pow != 305760 {
+		t.Errorf("Expected power of 305760, got %d.\n", pow)
+	}
+}
+
 func TestPower(t *testing.T) {
 	imgA := rgb.Make(image.Rect(0, 0, 10, 10))
 	imgB := rgb.Make(image.Rect(0, 0, 10, 10))
