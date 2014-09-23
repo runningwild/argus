@@ -7,76 +7,76 @@ func PowerLine(aRgba, bRgba []byte) uint64 {
 	var power uint64 = 0.0
 	var diff int64
 
-	diff = int64(int8(aRgba[0] - bRgba[0]))
+	diff = int64(int(aRgba[0]) - int(bRgba[0]))
 	power += uint64(diff * diff)
 
-	diff = int64(int8(aRgba[1] - bRgba[1]))
+	diff = int64(int(aRgba[1]) - int(bRgba[1]))
 	power += uint64(diff * diff)
 
-	diff = int64(int8(aRgba[2] - bRgba[2]))
+	diff = int64(int(aRgba[2]) - int(bRgba[2]))
 	power += uint64(diff * diff)
 
-	diff = int64(int8(aRgba[3] - bRgba[3]))
+	diff = int64(int(aRgba[3]) - int(bRgba[3]))
 	power += uint64(diff * diff)
 
-	diff = int64(int8(aRgba[4] - bRgba[4]))
+	diff = int64(int(aRgba[4]) - int(bRgba[4]))
 	power += uint64(diff * diff)
 
-	diff = int64(int8(aRgba[5] - bRgba[5]))
+	diff = int64(int(aRgba[5]) - int(bRgba[5]))
 	power += uint64(diff * diff)
 
-	diff = int64(int8(aRgba[6] - bRgba[6]))
+	diff = int64(int(aRgba[6]) - int(bRgba[6]))
 	power += uint64(diff * diff)
 
-	diff = int64(int8(aRgba[7] - bRgba[7]))
+	diff = int64(int(aRgba[7]) - int(bRgba[7]))
 	power += uint64(diff * diff)
 
-	diff = int64(int8(aRgba[8] - bRgba[8]))
+	diff = int64(int(aRgba[8]) - int(bRgba[8]))
 	power += uint64(diff * diff)
 
-	diff = int64(int8(aRgba[9] - bRgba[9]))
+	diff = int64(int(aRgba[9]) - int(bRgba[9]))
 	power += uint64(diff * diff)
 
-	diff = int64(int8(aRgba[10] - bRgba[10]))
+	diff = int64(int(aRgba[10]) - int(bRgba[10]))
 	power += uint64(diff * diff)
 
-	diff = int64(int8(aRgba[11] - bRgba[11]))
+	diff = int64(int(aRgba[11]) - int(bRgba[11]))
 	power += uint64(diff * diff)
 
-	diff = int64(int8(aRgba[12] - bRgba[12]))
+	diff = int64(int(aRgba[12]) - int(bRgba[12]))
 	power += uint64(diff * diff)
 
-	diff = int64(int8(aRgba[13] - bRgba[13]))
+	diff = int64(int(aRgba[13]) - int(bRgba[13]))
 	power += uint64(diff * diff)
 
-	diff = int64(int8(aRgba[14] - bRgba[14]))
+	diff = int64(int(aRgba[14]) - int(bRgba[14]))
 	power += uint64(diff * diff)
 
-	diff = int64(int8(aRgba[15] - bRgba[15]))
+	diff = int64(int(aRgba[15]) - int(bRgba[15]))
 	power += uint64(diff * diff)
 
-	diff = int64(int8(aRgba[16] - bRgba[16]))
+	diff = int64(int(aRgba[16]) - int(bRgba[16]))
 	power += uint64(diff * diff)
 
-	diff = int64(int8(aRgba[17] - bRgba[17]))
+	diff = int64(int(aRgba[17]) - int(bRgba[17]))
 	power += uint64(diff * diff)
 
-	diff = int64(int8(aRgba[18] - bRgba[18]))
+	diff = int64(int(aRgba[18]) - int(bRgba[18]))
 	power += uint64(diff * diff)
 
-	diff = int64(int8(aRgba[19] - bRgba[19]))
+	diff = int64(int(aRgba[19]) - int(bRgba[19]))
 	power += uint64(diff * diff)
 
-	diff = int64(int8(aRgba[20] - bRgba[20]))
+	diff = int64(int(aRgba[20]) - int(bRgba[20]))
 	power += uint64(diff * diff)
 
-	diff = int64(int8(aRgba[21] - bRgba[21]))
+	diff = int64(int(aRgba[21]) - int(bRgba[21]))
 	power += uint64(diff * diff)
 
-	diff = int64(int8(aRgba[22] - bRgba[22]))
+	diff = int64(int(aRgba[22]) - int(bRgba[22]))
 	power += uint64(diff * diff)
 
-	diff = int64(int8(aRgba[23] - bRgba[23]))
+	diff = int64(int(aRgba[23]) - int(bRgba[23]))
 	power += uint64(diff * diff)
 
 	return power

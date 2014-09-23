@@ -34,7 +34,7 @@ var maxBlocksPerMoment = flag.Int("bpm", 2000, "Maximum blocks per moment")
 // for each changed cell:
 // a jpeg or png replacement
 
-// copies b onto a
+// copies a blcok from b onto a.  Assumes that a and b are the same dimensions.
 func copyBlock(a, b *rgb.Image, x0, y0, x1, y1 int) {
 	for y := y0; y < y1; y++ {
 		start := a.PixOffset(x0, y)
@@ -290,6 +290,7 @@ func decodeDiff(r io.ReadSeeker, updater updateImage) (err error) {
 		if len(offsets) > 0 {
 			fmt.Printf("Offsets: %v\n", len(offsets))
 			for i, offset := range offsets {
+
 				draw.Draw(ref, image.Rect(offset.X, offset.Y, offset.X+8, offset.Y+8), momentBlocks, image.Point{0, (momentBlockCount + i) * 8}, draw.Over)
 			}
 			draw.Draw(refDebug, refDebug.Bounds(), ref, image.Point{}, draw.Over)
