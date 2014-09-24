@@ -485,7 +485,7 @@ func main() {
 		}
 		argus.Close()
 	}
-
+return
 	{
 		fmt.Printf("Decoding...\n")
 		f, err := os.Open(*inputArgus)
