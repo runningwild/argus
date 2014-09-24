@@ -30,9 +30,6 @@ type Image struct {
 }
 
 func (im *Image) At(x, y int) color.Color {
-	if !(image.Point{x, y}).In(im.Rect) {
-		return color.Black
-	}
 	offset := im.PixOffset(x, y)
 	return color.RGBA{im.Pix[offset], im.Pix[offset+1], im.Pix[offset+2], 255}
 }

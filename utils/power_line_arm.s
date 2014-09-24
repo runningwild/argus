@@ -25,6 +25,11 @@ TEXT	·PowerLine+0(SB),16,$36-32
 
         MOVW    0(R0), R2       // Store 4 bytes of A in R2
         MOVW    0(R1), R3       // Store 4 bytes of B in R2
+
+        CMP     R2, R3          // If these values are equal then we can skip everything on this
+                                // iteration.
+        BEQ     LOOPINC
+
         AND     $255, R2, R4    // Put the lowest byte of A in R4
         AND     $255, R3, R5    // Put the lowest byte of B in R5
         SUB     R4, R5, R4      // Compute the power and add it to R8
@@ -50,6 +55,7 @@ TEXT	·PowerLine+0(SB),16,$36-32
         SUB     R4, R5, R4
         WORD $0xe0288494;       // R8 = R8 + R4 *R4
 
+        LOOPINC:
         ADD     $4, R0, R0
         ADD     $4, R1, R1
 
@@ -61,5 +67,6 @@ TEXT	·PowerLine+0(SB),16,$36-32
 	MOVW	R8,·r2+24(FP)		// FP+24 is the low part of the return value
 	MOVW	R1,·r2+28(FP)		// FP+28 is the high part of the return value
 	RET
+
 
 

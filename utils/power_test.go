@@ -105,7 +105,7 @@ func TestPower(t *testing.T) {
 	}
 }
 
-func BenchmarkPower(b *testing.B) {
+func BenchmarkPowerAllSame(b *testing.B) {
 	imgA := rgb.Make(image.Rect(0, 0, 8, 8))
 	imgB := rgb.Make(image.Rect(0, 0, 8, 8))
 	b.ResetTimer()
@@ -113,3 +113,16 @@ func BenchmarkPower(b *testing.B) {
 		utils.Power(imgA, imgB, 0, 0, 100)
 	}
 }
+
+func BenchmarkPowerAllDifferent(b *testing.B) {
+	imgA := rgb.Make(image.Rect(0, 0, 8, 8))
+	imgB := rgb.Make(image.Rect(0, 0, 8, 8))
+	for i := range imgB.Pix {
+		imgB.Pix[i] = byte(i + 1)
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		utils.Power(imgA, imgB, 0, 0, 100)
+	}
+}
+
