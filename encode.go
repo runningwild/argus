@@ -314,8 +314,8 @@ func encodeDiff(initialFrame *rgb.Image, updater updateImage, w io.WriteSeeker) 
 	}()
 	ref := rgb.Make(initialFrame.Bounds())
 	cur := rgb.Make(initialFrame.Bounds())
-	draw.Draw(ref, ref.Bounds(), initialFrame, image.Point{}, draw.Over)
-	draw.Draw(cur, cur.Bounds(), initialFrame, image.Point{}, draw.Over)
+	copy(ref.Pix, initialFrame.Pix)
+	copy(cur.Pix, initialFrame.Pix)
 	q := qtree.MakeTree(ref.Bounds().Dx(), ref.Bounds().Dy(), *maxPowerPerPixel)
 	qbuf := bytes.NewBuffer(nil)
 	count := -1
@@ -485,7 +485,7 @@ func main() {
 		}
 		argus.Close()
 	}
-return
+	return
 	{
 		fmt.Printf("Decoding...\n")
 		f, err := os.Open(*inputArgus)
