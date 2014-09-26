@@ -15,11 +15,12 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
+	"path/filepath"
 	"runtime/pprof"
-	"sort"
+	"time"
 )
 
-var inputArgus = flag.String("inargus", "", "If set skip encoding and use this file")
+var inputDir = flag.String("dir", "", "Directory to deposit frames into.")
 var cpuprof = flag.String("prof.cpu", "", "write cpu profile to file")
 var maxPowerPerPixel = flag.Uint64("ppp", 200, "Maximum power-per-pixel")
 var maxFramesPerMoment = flag.Int("fpm", 100, "Maximum frames per moment")
@@ -434,6 +435,50 @@ func loadImageFromFilenameOnto(filename string, dst *rgb.Image) error {
 	return nil
 }
 
+type fileInfo struct {
+	name string
+	data []byte
+}
+
+func consumeFiles(dir string) (<-chan fileInfo, <-chan error) {
+	files := make(chan fileInfo)
+	errors := make(chan error)
+	go func() {
+		defer close(files)
+		defer close(errors)
+		for {
+			d, err := os.Open(dir)
+			if err != nil {
+				errors <- err
+				return
+			}
+			names, err := d.Readdirnames(1)
+			if err != nil && err != io.EOF {
+				errors <- err
+				return
+			}
+			if len(names) == 0 {
+				time.Sleep(time.Second)
+				continue
+			}
+			d.Close()
+			filename := filepath.Join(dir, names[0])
+			data, err := ioutil.ReadFile(filename)
+			if err != nil {
+				errors <- err
+				return
+			}
+			files <- fileInfo{name: filename, data: data}
+			err = os.Remove(filename)
+			if err != nil {
+				errors <- err
+				return
+			}
+		}
+	}()
+	return files, errors
+}
+
 func main() {
 	flag.Parse()
 	if *cpuprof != "" {
@@ -444,51 +489,46 @@ func main() {
 		pprof.StartCPUProfile(f)
 		defer pprof.StopCPUProfile()
 	}
-	if *inputArgus == "" {
-		inputFilenames := flag.Args()
-		if len(inputFilenames) < 2 {
-			fmt.Printf("Must specify at least two files, you specified %v\n", inputFilenames)
-			os.Exit(1)
-		}
-		sort.Strings(inputFilenames)
-
-		*inputArgus = "diff.argus"
-		argus, err := os.Create(*inputArgus)
-		if err != nil {
-			fmt.Printf("Failed to create output file: %v\n", err)
-			os.Exit(1)
-		}
-		rawFrame, err := loadImage(inputFilenames[0], 640, 480)
-		if err != nil {
-			fmt.Printf("Unable to open file %q: %v\n", inputFilenames[0], err)
-			os.Exit(1)
-		}
-		initialImage := rgb.Make(rawFrame.Bounds())
-		draw.Draw(initialImage, rawFrame.Bounds(), rawFrame, image.Point{}, draw.Over)
-		updater := func(im *rgb.Image) error {
-			inputFilenames = inputFilenames[1:]
-			if len(inputFilenames) == 0 {
-				return fmt.Errorf("Ran out of images")
-			}
-			loadImageFromFilenameOnto(inputFilenames[0], im)
-			// rawFrame, err := loadImage(inputFilenames[0], 640, 480)
-			// if err != nil {
-			// 	return err
-			// }
-			// im.Pix = rawFrame.Pix
-			return nil
-		}
-		err = encodeDiff(initialImage, updater, argus)
-		if err != nil {
-			fmt.Printf("Failed to encode argus: %v\n", err)
-			os.Exit(1)
-		}
-		argus.Close()
+	if *inputDir == "" {
+		fmt.Printf("Must specify input directory with --dir.\n")
+		os.Exit(1)
 	}
+
+	files, errs := consumeFiles(*inputDir)
+	updater := func(frame *rgb.Image) error {
+		select {
+		case file := <-files:
+			fmt.Printf("%s\n", file.name)
+			frame.Pix = file.data
+		case err := <-errs:
+			return err
+		}
+		return nil
+	}
+	argus, err := os.Create("diff.argus")
+	if err != nil {
+		fmt.Printf("Failed to create output file: %v\n", err)
+		os.Exit(1)
+	}
+	var rawFrame *rgb.Image
+	select {
+	case file := <-files:
+		rawFrame = rgb.MakeWithData(image.Rect(0, 0, 640, 480), file.data)
+	case err := <-errs:
+		fmt.Printf("Failed to load the first image: %v\n", err)
+		os.Exit(1)
+	}
+	err = encodeDiff(rawFrame, updater, argus)
+	if err != nil {
+		fmt.Printf("Failed to encode argus: %v\n", err)
+		os.Exit(1)
+	}
+	argus.Close()
 	return
+
 	{
 		fmt.Printf("Decoding...\n")
-		f, err := os.Open(*inputArgus)
+		f, err := os.Open("diff.argus")
 		if err != nil {
 			panic(err)
 		}
