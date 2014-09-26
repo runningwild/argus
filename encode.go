@@ -538,6 +538,7 @@ func decodeCmd() {
 			return nil
 		}
 		jpeg.Encode(out, frame, nil)
+		out.Close()
 		return nil
 	}
 
