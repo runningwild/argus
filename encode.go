@@ -462,6 +462,7 @@ func consumeFiles(dir string) (<-chan fileInfo, <-chan error) {
 				return
 			}
 			if len(names) <= 1 {
+				fmt.Printf("No files available...\n")
 				time.Sleep(time.Second)
 				continue
 			}
@@ -471,6 +472,11 @@ func consumeFiles(dir string) (<-chan fileInfo, <-chan error) {
 			if err != nil {
 				errors <- err
 				return
+			}
+			if len(data) != 640*480*3 {
+				fmt.Printf("Data length was %d, waiting...\n")
+				time.Sleep(time.Second)
+				continue
 			}
 			files <- fileInfo{name: filename, data: data}
 			err = os.Remove(filename)
@@ -556,13 +562,13 @@ func main() {
 		fmt.Printf("Must specify a valid cmd with --cmd: 'encode' or 'decode'.\n")
 		os.Exit(1)
 	}
-	if *inputDir == "" {
-		fmt.Printf("Must specify input directory with --dir.\n")
-		os.Exit(1)
-	}
 
 	switch *cmd {
 	case "encode":
+		if *inputDir == "" {
+			fmt.Printf("Must specify input directory with --dir.\n")
+			os.Exit(1)
+		}
 		encodeCmd()
 	case "decode":
 		decodeCmd()
