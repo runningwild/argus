@@ -298,8 +298,8 @@ func decodeDiff(r io.ReadSeeker, updater updateImage) (err error) {
 				draw.Draw(refDebug, image.Rect(offset.X, offset.Y, offset.X+8, offset.Y+8), tintRed{momentBlocks}, image.Point{0, (momentBlockCount + i) * 8}, draw.Over)
 			}
 			momentBlockCount += len(offsets)
+			updater(ref)
 		}
-		updater(ref)
 	}
 	return nil
 }
