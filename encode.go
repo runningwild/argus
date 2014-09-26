@@ -474,7 +474,7 @@ func consumeFiles(dir string) (<-chan fileInfo, <-chan error) {
 				return
 			}
 			if len(data) != 640*480*3 {
-				fmt.Printf("Data length was %d, waiting...\n")
+				fmt.Printf("Data length was %d, waiting...\n", len(data))
 				time.Sleep(time.Second)
 				continue
 			}
