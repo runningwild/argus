@@ -461,7 +461,7 @@ func consumeFiles(dir string) (<-chan fileInfo, <-chan error) {
 				errors <- err
 				return
 			}
-			if len(names) == 0 {
+			if len(names) <= 1 {
 				time.Sleep(time.Second)
 				continue
 			}
