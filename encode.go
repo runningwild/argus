@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/pprof"
+	"sort"
 	"time"
 )
 
@@ -454,7 +455,8 @@ func consumeFiles(dir string) (<-chan fileInfo, <-chan error) {
 				errors <- err
 				return
 			}
-			names, err := d.Readdirnames(1)
+			names, err := d.Readdirnames(-1)
+			d.Close()
 			if err != nil && err != io.EOF {
 				errors <- err
 				return
@@ -463,7 +465,7 @@ func consumeFiles(dir string) (<-chan fileInfo, <-chan error) {
 				time.Sleep(time.Second)
 				continue
 			}
-			d.Close()
+			sort.Strings(names)
 			filename := filepath.Join(dir, names[0])
 			data, err := ioutil.ReadFile(filename)
 			if err != nil {
