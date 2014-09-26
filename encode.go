@@ -21,6 +21,8 @@ import (
 )
 
 var inputDir = flag.String("dir", "", "Directory to deposit frames into.")
+var inputArgus = flag.String("input", "", ".argus file to decode from.")
+var cmd = flag.String("cmd", "", "encode or decode")
 var cpuprof = flag.String("prof.cpu", "", "write cpu profile to file")
 var maxPowerPerPixel = flag.Uint64("ppp", 200, "Maximum power-per-pixel")
 var maxFramesPerMoment = flag.Int("fpm", 100, "Maximum frames per moment")
@@ -479,21 +481,7 @@ func consumeFiles(dir string) (<-chan fileInfo, <-chan error) {
 	return files, errors
 }
 
-func main() {
-	flag.Parse()
-	if *cpuprof != "" {
-		f, err := os.Create(*cpuprof)
-		if err != nil {
-			panic(err)
-		}
-		pprof.StartCPUProfile(f)
-		defer pprof.StopCPUProfile()
-	}
-	if *inputDir == "" {
-		fmt.Printf("Must specify input directory with --dir.\n")
-		os.Exit(1)
-	}
-
+func encodeCmd() {
 	files, errs := consumeFiles(*inputDir)
 	updater := func(frame *rgb.Image) error {
 		select {
@@ -524,31 +512,58 @@ func main() {
 		os.Exit(1)
 	}
 	argus.Close()
-	return
+}
 
-	{
-		fmt.Printf("Decoding...\n")
-		f, err := os.Open("diff.argus")
+func decodeCmd() {
+	f, err := os.Open(*inputArgus)
+	if err != nil {
+		panic(err)
+	}
+	defer f.Close()
+
+	count := 0
+	update := func(frame *rgb.Image) error {
+		count++
+		out, err := os.Create(fmt.Sprintf("ref-%05d.jpg", count))
+		if err != nil {
+			fmt.Printf("Error: %v\n", err)
+			return nil
+		}
+		jpeg.Encode(out, frame, nil)
+		return nil
+	}
+
+	err = decodeDiff(f, update)
+	if err != nil {
+		fmt.Printf("Error on decoding: %v\n", err)
+	}
+}
+
+func main() {
+	flag.Parse()
+	if *cpuprof != "" {
+		f, err := os.Create(*cpuprof)
 		if err != nil {
 			panic(err)
 		}
-		defer f.Close()
-
-		count := 0
-		update := func(frame *rgb.Image) error {
-			count++
-			out, err := os.Create(fmt.Sprintf("ref-%04d.jpg", count))
-			if err != nil {
-				fmt.Printf("Error: %v\n", err)
-				return nil
-			}
-			jpeg.Encode(out, frame, nil)
-			return nil
-		}
-
-		err = decodeDiff(f, update)
-		if err != nil {
-			fmt.Printf("Error on decoding: %v\n", err)
-		}
+		pprof.StartCPUProfile(f)
+		defer pprof.StopCPUProfile()
 	}
+	validCmds := map[string]bool{"encode": true, "decode": true}
+	if !validCmds[*cmd] {
+		fmt.Printf("Must specify a valid cmd with --cmd: 'encode' or 'decode'.\n")
+		os.Exit(1)
+	}
+	if *inputDir == "" {
+		fmt.Printf("Must specify input directory with --dir.\n")
+		os.Exit(1)
+	}
+
+	switch *cmd {
+	case "encode":
+		encodeCmd()
+	case "decode":
+		decodeCmd()
+	}
+
 }
