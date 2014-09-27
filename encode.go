@@ -474,9 +474,14 @@ func consumeFiles(dir string) (<-chan fileInfo, <-chan error) {
 				return
 			}
 			if len(data) != 640*480*3 {
-				fmt.Printf("Data length was %d, waiting...\n", len(data))
-				time.Sleep(time.Second)
-				continue
+				fmt.Printf("Data length was %d, trying jpeg...\n", len(data))
+				im, _, err := image.Decode(bytes.NewBuffer(data))
+				if err != nil {
+					time.Sleep(time.Second)
+					continue
+				}
+				frame := rgb.Make(image.Rect(0, 0, 640, 480))
+				draw.Draw(frame, frame.Bounds(), im, image.Point{}, draw.Over)
 			}
 			files <- fileInfo{name: filename, data: data}
 			err = os.Remove(filename)
