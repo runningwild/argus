@@ -482,6 +482,7 @@ func consumeFiles(dir string) (<-chan fileInfo, <-chan error) {
 				}
 				frame := rgb.Make(image.Rect(0, 0, 640, 480))
 				draw.Draw(frame, frame.Bounds(), im, image.Point{}, draw.Over)
+				data = frame.Pix
 			}
 			files <- fileInfo{name: filename, data: data}
 			err = os.Remove(filename)
