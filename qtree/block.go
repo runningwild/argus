@@ -16,6 +16,9 @@ type MomentBlocks struct {
 func (mb *MomentBlocks) AddBlock(b Block) {
 	mb.blocks = append(mb.blocks, b)
 }
+func (mb *MomentBlocks) NumBlocks() int {
+	return len(mb.blocks)
+}
 func (mb *MomentBlocks) Bounds() image.Rectangle {
 	return image.Rect(0, 0, 8, len(mb.blocks)*8)
 }

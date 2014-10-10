@@ -4,7 +4,7 @@
 package utils
 
 func PowerLine(aRgba, bRgba []byte) uint64 {
-	var power uint64 = 0.0
+	var power uint64 = 0
 	var diff int64
 
 	diff = int64(int(aRgba[0]) - int(bRgba[0]))

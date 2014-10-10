@@ -1,27 +1,14 @@
 package utils
 
 import (
-	"github.com/runningwild/argus/rgb"
+	"github.com/runningwild/argus/qtree"
 )
 
-func Power(a, b *rgb.Image, x0, y0 int, mppp uint64) (pow uint64, over bool) {
-	pow = 0
-	offset := a.PixOffset(x0, y0)
-	pow += PowerLine(a.Pix[offset:], b.Pix[offset:])
-	offset += a.Stride
-	pow += PowerLine(a.Pix[offset:], b.Pix[offset:])
-	offset += a.Stride
-	pow += PowerLine(a.Pix[offset:], b.Pix[offset:])
-	offset += a.Stride
-	pow += PowerLine(a.Pix[offset:], b.Pix[offset:])
-	offset += a.Stride
-	pow += PowerLine(a.Pix[offset:], b.Pix[offset:])
-	offset += a.Stride
-	pow += PowerLine(a.Pix[offset:], b.Pix[offset:])
-	offset += a.Stride
-	pow += PowerLine(a.Pix[offset:], b.Pix[offset:])
-	offset += a.Stride
-	pow += PowerLine(a.Pix[offset:], b.Pix[offset:])
-	over = pow > mppp*64
-	return
+func Power(a, b qtree.Block) (pow uint64) {
+	var power uint64 = 0
+	for i := range a {
+		diff := int64(int64(a[i]) - int64(b[i]))
+		power += uint64(diff * diff)
+	}
+	return power
 }

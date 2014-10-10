@@ -1,128 +1,67 @@
 package utils_test
 
 import (
-	"github.com/runningwild/argus/rgb"
+	"github.com/orfjackal/gospec/src/gospec"
+	"github.com/runningwild/argus/qtree"
 	"github.com/runningwild/argus/utils"
-	"image"
 	"testing"
 )
 
-func TestPowerLine(t *testing.T) {
-	a := make([]byte, 24)
-	b := make([]byte, 24)
-	for i := 0; i < 24; i++ {
-		a[i] = (byte)(i*13 + 17)
-		b[i] = (byte)(i*253 + 11)
-	}
-	pow := utils.PowerLine(a, b)
-	if pow != 305760 {
-		t.Errorf("Expected power of 305760, got %d.\n", pow)
-	}
-}
+func PowerSpec(c gospec.Context) {
+	var b0, b1, b2, b3 qtree.Block
+	b0[0] = 10
+	b0[1] = 20
+	b0[2] = 30
+	b0[3] = 40
+	b0[4] = 50
+	b0[5] = 60
+	b1[0] = 20
+	b1[1] = 30
+	b1[2] = 40
+	b1[3] = 50
+	b1[4] = 60
+	b1[5] = 70
 
-func TestPower(t *testing.T) {
-	imgA := rgb.Make(image.Rect(0, 0, 10, 10))
-	imgB := rgb.Make(image.Rect(0, 0, 10, 10))
-
-	pow, over := utils.Power(imgA, imgB, 0, 0, 1)
-	if pow != 0 {
-		t.Errorf("Expected power of 0, got %v.\n", pow)
-	}
-	if over {
-		t.Errorf("Expected not to be over.\n")
+	for i := range b3 {
+		// Something randomish
+		b3[i] = byte(i*10 + i*i + 3)
 	}
 
-	offset := imgA.PixOffset(0, 0)
-	imgA.Pix[offset+0] = 10
-	imgA.Pix[offset+1] = 10
-	imgA.Pix[offset+2] = 10
-	pow, over = utils.Power(imgA, imgB, 0, 0, 1)
-	if pow != 300 {
-		t.Errorf("Expected power of 300, got %v.\n", pow)
-	}
-	if !over {
-		t.Errorf("Expected to be over.\n")
-	}
-
-	pow, over = utils.Power(imgA, imgB, 1, 1, 1)
-	if pow != 0 {
-		t.Errorf("Expected power of 0, got %v.\n", pow)
-	}
-	if over {
-		t.Errorf("Expected not to be over.\n")
-	}
-
-	offset = imgA.PixOffset(0, 0)
-	imgB.Pix[offset+0] = 10
-	imgB.Pix[offset+1] = 10
-	imgB.Pix[offset+2] = 10
-	offset = imgA.PixOffset(9, 9)
-	imgB.Pix[offset+0] = 0
-	imgB.Pix[offset+1] = 10
-	imgB.Pix[offset+2] = 20
-	pow, over = utils.Power(imgA, imgB, 0, 0, 1)
-	if pow != 0 {
-		t.Errorf("Expected power of 0, got %v.\n", pow)
-	}
-	if over {
-		t.Errorf("Expected not to be over.\n")
-	}
-	pow, over = utils.Power(imgA, imgB, 1, 1, 1)
-	if pow != 0 {
-		t.Errorf("Expected power of 0, got %v.\n", pow)
-	}
-	if over {
-		t.Errorf("Expected not to be over.\n")
-	}
-	pow, over = utils.Power(imgA, imgB, 2, 2, 1)
-	if pow != 500 {
-		t.Errorf("Expected power of 500, got %v.\n", pow)
-	}
-	if !over {
-		t.Errorf("Expected to be over.\n")
-	}
-
-	imgA = rgb.Make(image.Rect(0, 0, 8, 8))
-	imgB = rgb.Make(image.Rect(0, 0, 8, 8))
-	var max uint64
-	for i := range imgA.Pix {
-		imgA.Pix[i] = 255
-		max += 255 * 255
-	}
-	for i := range imgB.Pix {
-		imgB.Pix[i] = 0
-	}
-	pow = utils.PowerLine(imgA.Pix, imgB.Pix)
-	if pow != 255*255*3*8 {
-		t.Errorf("Expected power of %d, got %d.\n", 255*255*3*8, pow)
-	}
-	pow, over = utils.Power(imgA, imgB, 0, 0, 1)
-	if pow != max {
-		t.Errorf("Expected power of %d, got %d.\n", max, pow)
-	}
-	if !over {
-		t.Errorf("Expected to be over.\n")
-	}
+	c.Specify("Blocks have zero power relative to themselves", func() {
+		c.Expect(utils.Power(b0, b0), gospec.Equals, uint64(0))
+		c.Expect(utils.Power(b1, b1), gospec.Equals, uint64(0))
+		c.Expect(utils.Power(b2, b2), gospec.Equals, uint64(0))
+		c.Expect(utils.Power(b3, b3), gospec.Equals, uint64(0))
+	})
+	c.Specify("Simple manual power check", func() {
+		c.Expect(utils.Power(b0, b1), gospec.Equals, uint64(600))
+		c.Expect(utils.Power(b1, b0), gospec.Equals, uint64(600))
+	})
+	c.Specify("Simple manual power check", func() {
+		c.Expect(utils.Power(b0, b2), gospec.Equals, uint64(9100))
+		c.Expect(utils.Power(b2, b0), gospec.Equals, uint64(9100))
+	})
+	c.Specify("Simple manual power check", func() {
+		c.Expect(utils.Power(b1, b2), gospec.Equals, uint64(13900))
+		c.Expect(utils.Power(b2, b1), gospec.Equals, uint64(13900))
+	})
 }
 
 func BenchmarkPowerAllSame(b *testing.B) {
-	imgA := rgb.Make(image.Rect(0, 0, 8, 8))
-	imgB := rgb.Make(image.Rect(0, 0, 8, 8))
+	var b0, b1 qtree.Block
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		utils.Power(imgA, imgB, 0, 0, 100)
+		utils.Power(b0, b1)
 	}
 }
 
 func BenchmarkPowerAllDifferent(b *testing.B) {
-	imgA := rgb.Make(image.Rect(0, 0, 8, 8))
-	imgB := rgb.Make(image.Rect(0, 0, 8, 8))
-	for i := range imgB.Pix {
-		imgB.Pix[i] = byte(i + 1)
+	var b0, b1 qtree.Block
+	for i := range b1 {
+		b1[i] = byte(i)
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		utils.Power(imgA, imgB, 0, 0, 100)
+		utils.Power(b0, b1)
 	}
 }
-
