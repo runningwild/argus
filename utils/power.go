@@ -1,3 +1,6 @@
+// +build !arm
+
+// Default implementations for architectures without assembly versions.
 package utils
 
 import (

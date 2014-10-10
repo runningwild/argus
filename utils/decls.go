@@ -3,5 +3,8 @@
 // Declarations for architectures using assembly versions of the below functions.
 package utils
 
-func PowerLine(aRgba, bRgba []byte) uint64
+import (
+	"github.com/runningwild/argus/qtree"
+)
 
+func Power(a, b qtree.Block) uint64
