@@ -7,4 +7,4 @@ import (
 	"github.com/runningwild/argus/qtree"
 )
 
-func Power(a, b qtree.Block) uint64
+func Power(a, b *qtree.Block) uint64

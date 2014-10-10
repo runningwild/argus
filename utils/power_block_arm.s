@@ -6,11 +6,11 @@
 // regs 8 8 4 (1001) 4  (1001 is the MLA code)
 // 1110 0000 - 0010 1000 - 1000 0100 - 1001 0100
 
-TEXT	·PowerLine+0(SB),16,$36-32
-	MOVW	$·aRgba+0(FP),R0
+TEXT	·Power+0(SB),16,$36-16
+	MOVW	$·a+0(FP),R0
 	MOVW	0(R0), R0		// R0 holds the address of the first element in array A
 
-	MOVW	$·bRgba+12(FP),R1
+	MOVW	$·b+4(FP),R1
 	MOVW	0(R1), R1		// R1 holds the address of the first element in array B
 
         MOVW	$0, R8			// R8 will accumulate the power (RAWR!!)
@@ -20,7 +20,7 @@ TEXT	·PowerLine+0(SB),16,$36-32
 
         START:
         ADD     $1, R6, R6
-        CMP     $7, R6
+        CMP     $49, R6
         BEQ     DONE
 
         MOVW    0(R0), R2       // Store 4 bytes of A in R2
@@ -64,9 +64,8 @@ TEXT	·PowerLine+0(SB),16,$36-32
 
         DONE:
 	MOVW	$0, R1
-	MOVW	R8,·r2+24(FP)		// FP+24 is the low part of the return value
-	MOVW	R1,·r2+28(FP)		// FP+28 is the high part of the return value
+	MOVW	R8,·r2+8(FP)		// FP+8 is the low part of the return value
+	MOVW	R1,·r2+12(FP)		// FP+12 is the high part of the return value
 	RET
-
 
 
