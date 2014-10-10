@@ -8,7 +8,7 @@ import (
 )
 
 func PowerSpec(c gospec.Context) {
-	var b0, b1, b2, b3 qtree.Block
+	var b0, b1, b2, b3, b4 qtree.Block
 	b0[0] = 10
 	b0[1] = 20
 	b0[2] = 30
@@ -25,6 +25,10 @@ func PowerSpec(c gospec.Context) {
 	for i := range b3 {
 		// Something randomish
 		b3[i] = byte(i*10 + i*i + 3)
+		if b3[i] == 0 {
+			b3[i] = 1
+		}
+		b4[i] = b3[i] - 1
 	}
 
 	c.Specify("Blocks have zero power relative to themselves", func() {
@@ -44,6 +48,10 @@ func PowerSpec(c gospec.Context) {
 	c.Specify("Simple manual power check", func() {
 		c.Expect(utils.Power(&b1, &b2), gospec.Equals, uint64(13900))
 		c.Expect(utils.Power(&b2, &b1), gospec.Equals, uint64(13900))
+	})
+	c.Specify("Power function should cover every pixel in a block", func() {
+		c.Expect(utils.Power(&b3, &b4), gospec.Equals, uint64(192))
+		c.Expect(utils.Power(&b4, &b3), gospec.Equals, uint64(192))
 	})
 }
 
