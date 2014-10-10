@@ -28,22 +28,22 @@ func PowerSpec(c gospec.Context) {
 	}
 
 	c.Specify("Blocks have zero power relative to themselves", func() {
-		c.Expect(utils.Power(b0, b0), gospec.Equals, uint64(0))
-		c.Expect(utils.Power(b1, b1), gospec.Equals, uint64(0))
-		c.Expect(utils.Power(b2, b2), gospec.Equals, uint64(0))
-		c.Expect(utils.Power(b3, b3), gospec.Equals, uint64(0))
+		c.Expect(utils.Power(&b0, &b0), gospec.Equals, uint64(0))
+		c.Expect(utils.Power(&b1, &b1), gospec.Equals, uint64(0))
+		c.Expect(utils.Power(&b2, &b2), gospec.Equals, uint64(0))
+		c.Expect(utils.Power(&b3, &b3), gospec.Equals, uint64(0))
 	})
 	c.Specify("Simple manual power check", func() {
-		c.Expect(utils.Power(b0, b1), gospec.Equals, uint64(600))
-		c.Expect(utils.Power(b1, b0), gospec.Equals, uint64(600))
+		c.Expect(utils.Power(&b0, &b1), gospec.Equals, uint64(600))
+		c.Expect(utils.Power(&b1, &b0), gospec.Equals, uint64(600))
 	})
 	c.Specify("Simple manual power check", func() {
-		c.Expect(utils.Power(b0, b2), gospec.Equals, uint64(9100))
-		c.Expect(utils.Power(b2, b0), gospec.Equals, uint64(9100))
+		c.Expect(utils.Power(&b0, &b2), gospec.Equals, uint64(9100))
+		c.Expect(utils.Power(&b2, &b0), gospec.Equals, uint64(9100))
 	})
 	c.Specify("Simple manual power check", func() {
-		c.Expect(utils.Power(b1, b2), gospec.Equals, uint64(13900))
-		c.Expect(utils.Power(b2, b1), gospec.Equals, uint64(13900))
+		c.Expect(utils.Power(&b1, &b2), gospec.Equals, uint64(13900))
+		c.Expect(utils.Power(&b2, &b1), gospec.Equals, uint64(13900))
 	})
 }
 
@@ -51,7 +51,7 @@ func BenchmarkPowerAllSame(b *testing.B) {
 	var b0, b1 qtree.Block
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		utils.Power(b0, b1)
+		utils.Power(&b0, &b1)
 	}
 }
 
@@ -62,6 +62,6 @@ func BenchmarkPowerAllDifferent(b *testing.B) {
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		utils.Power(b0, b1)
+		utils.Power(&b0, &b1)
 	}
 }
