@@ -12,7 +12,7 @@ func VisitorSpec(c gospec.Context) {
 		for i := range region {
 			region[i] = make([]int, dy)
 		}
-		t := qtree.MakeTree(dx, dy)
+		t := qtree.MakeTree(dx, dy, 10, 10)
 		t.TraverseTopDown(func(t *qtree.Tree) bool {
 			if !t.Leaf() {
 				return true

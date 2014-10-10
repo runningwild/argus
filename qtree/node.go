@@ -6,12 +6,14 @@ import (
 )
 
 type params struct {
+	maxBufferLength int
 }
 
 type Info struct {
 	Over      bool
 	AboveOver bool
 	Power     uint64
+	Lru       []Block
 }
 
 // NEXT: construct a quad tree for the dims of the image.  The tree will be re-used for each frame.
@@ -107,8 +109,8 @@ func (t *Tree) TraverseBottomUp(visitor Visitor) {
 	visitor(t)
 }
 
-func MakeTree(dx, dy int, maxPowerPerPixel uint64) *Tree {
-	t := Tree{params: &params{}, x0: 0, y0: 0, x1: dx, y1: dy}
+func MakeTree(dx, dy int, maxPowerPerPixel uint64, backBufferSize uint8) *Tree {
+	t := Tree{params: &params{maxBufferLength: int(backBufferSize)}, x0: 0, y0: 0, x1: dx, y1: dy}
 	t.divide(maxPowerPerPixel)
 	return &t
 }

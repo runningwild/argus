@@ -34,26 +34,26 @@ TEXT	·PowerLine+0(SB),16,$36-32
         AND     $255, R3, R5    // Put the lowest byte of B in R5
         SUB     R4, R5, R4      // Compute the power and add it to R8
 
-        WORD $0xe0288494;       // R8 = R8 + R4 *R4
+        WORD $0xe0288494;       // R8 = R8 + R4*R4
 
         MOVW    R2>>8, R2       // Shift by 8 to get the next byte and repeat for all bytes
         MOVW    R3>>8, R3
         AND     $255, R2, R4
         AND     $255, R3, R5
         SUB     R4, R5, R4
-        WORD $0xe0288494;       // R8 = R8 + R4 *R4
+        WORD $0xe0288494;       // R8 = R8 + R4*R4
 
         MOVW    R2>>8, R2
         MOVW    R3>>8, R3
         AND     $255, R2, R4
         AND     $255, R3, R5
         SUB     R4, R5, R4
-        WORD $0xe0288494;       // R8 = R8 + R4 *R4
+        WORD $0xe0288494;       // R8 = R8 + R4*R4
 
         MOVW    R2>>8, R4
         MOVW    R3>>8, R5
         SUB     R4, R5, R4
-        WORD $0xe0288494;       // R8 = R8 + R4 *R4
+        WORD $0xe0288494;       // R8 = R8 + R4*R4
 
         LOOPINC:
         ADD     $4, R0, R0
