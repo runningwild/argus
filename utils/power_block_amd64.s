@@ -8,17 +8,22 @@ TEXT	·Power+0(SB),4,$24-24
 	LEAQ	(R8)(CX*1),AX	// AX: Addr A value
 	LEAQ	(R9)(CX*1),BX	// BX: Addr B value
 
-	MOVQ	$48, SI
+	MOVQ	$24, SI
 
-MONKEY:
+LOOPINC:
 	CMPQ	CX, SI
 	JGE		$0, DONE
-	INCQ	, CX
-	MOVQ	(AX),R8			// 4 byte value from block A
-	MOVQ	(BX),R9			// 4 byte value from block B
-	ADDQ	$4, AX
-	ADDQ	$4, BX
+	INCQ	CX
+	MOVQ	(AX),R8			// 8 byte value from block A
+	MOVQ	(BX),R9			// 8 byte value from block B
+	ADDQ	$8, AX
+	ADDQ	$8, BX
 
+	// Compare the values from A and B, if equal then skip this round
+	CMPQ	R8, R9
+	JEQ		$0, LOOPINC
+
+	// No need to SHR on the first one.
 	MOVQ    R8, R10
 	ANDQ	$255, R10
 	MOVQ    R9, R11
@@ -56,9 +61,47 @@ MONKEY:
 	SUBQ	R10, R11
 	IMULQ	R11, R11
 	ADDQ	R11, DX
-	JMP		,MONKEY
+
+	MOVQ    R8, R10
+	SHRQ	$32, R10
+	ANDQ	$255, R10
+	MOVQ    R9, R11
+	SHRQ	$32, R11
+	ANDQ	$255, R11
+	SUBQ	R10, R11
+	IMULQ	R11, R11
+	ADDQ	R11, DX
+
+	MOVQ    R8, R10
+	SHRQ	$40, R10
+	ANDQ	$255, R10
+	MOVQ    R9, R11
+	SHRQ	$40, R11
+	ANDQ	$255, R11
+	SUBQ	R10, R11
+	IMULQ	R11, R11
+	ADDQ	R11, DX
+
+	MOVQ    R8, R10
+	SHRQ	$48, R10
+	ANDQ	$255, R10
+	MOVQ    R9, R11
+	SHRQ	$48, R11
+	ANDQ	$255, R11
+	SUBQ	R10, R11
+	IMULQ	R11, R11
+	ADDQ	R11, DX
+
+	// No need to AND on the last one because there are no other bytes left
+	MOVQ    R8, R10
+	SHRQ	$56, R10
+	MOVQ    R9, R11
+	SHRQ	$56, R11
+	SUBQ	R10, R11
+	IMULQ	R11, R11
+	ADDQ	R11, DX
+	JMP		LOOPINC
 
 DONE:
 	MOVQ	DX, ·pow+16(FP)
-	MOVQ	$0, DX
 	RET
