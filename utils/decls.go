@@ -1,4 +1,4 @@
-// +build arm
+// +build arm amd64
 
 // Declarations for architectures using assembly versions of the below functions.
 package utils

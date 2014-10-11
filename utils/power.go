@@ -1,4 +1,5 @@
 // +build !arm
+// +build !amd64
 
 // Default implementations for architectures without assembly versions.
 package utils

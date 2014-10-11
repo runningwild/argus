@@ -49,10 +49,19 @@ func PowerSpec(c gospec.Context) {
 		c.Expect(utils.Power(&b1, &b2), gospec.Equals, uint64(13900))
 		c.Expect(utils.Power(&b2, &b1), gospec.Equals, uint64(13900))
 	})
+	c.Specify("Simple manual power check - zero vs zero", func() {
+		c.Expect(utils.Power(&b2, &b2), gospec.Equals, uint64(0))
+	})
 	c.Specify("Power function should cover every pixel in a block", func() {
 		c.Expect(utils.Power(&b3, &b4), gospec.Equals, uint64(192))
 		c.Expect(utils.Power(&b4, &b3), gospec.Equals, uint64(192))
 	})
+	for i := 0; i < 100; i++ {
+		var b0, b1 qtree.Block
+		for i := 0; i < 100; i++ {
+			utils.Power(&b0, &b1)
+		}
+	}
 }
 
 func BenchmarkPowerAllSame(b *testing.B) {
