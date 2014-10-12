@@ -10,5 +10,6 @@ func TestAllSpecs(t *testing.T) {
 	r := gospec.NewRunner()
 	r.AddSpec(VisitorSpec)
 	r.AddSpec(MomentBlocksSpec)
+	r.AddSpec(ExtractionSpec)
 	gospec.MainGoTest(r, t)
 }

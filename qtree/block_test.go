@@ -7,6 +7,7 @@ import (
 	"image"
 	"image/color"
 	"image/draw"
+	"testing"
 
 	// These are here for debugging
 	"fmt"
@@ -48,7 +49,6 @@ func MomentBlocksSpec(c gospec.Context) {
 
 		// These images should be equal
 		for i := range canvas1.Pix {
-			fmt.Printf("%d %d %d\n", i, canvas0.Pix[i], canvas1.Pix[i])
 			c.Expect(canvas1.Pix[i], gospec.Equals, canvas0.Pix[i])
 		}
 
@@ -86,4 +86,48 @@ func MomentBlocksSpec(c gospec.Context) {
 			}
 		}
 	})
+}
+
+func ExtractionSpec(c gospec.Context) {
+	c.Specify("Make sure that moment blocks encode properly", func() {
+		// Make some randomish image
+		dx := 80
+		dy := 88
+		ri := randomImage{dx, dy}
+		canvas := rgb.Make(ri.Bounds())
+		draw.Draw(canvas, canvas.Bounds(), ri, image.Point{}, draw.Over)
+		t := qtree.MakeTree(dx, dy, 0, 1)
+		t.SetToImage(canvas)
+		t.TraverseBottomUp(func(t *qtree.Tree) bool {
+			if !t.Leaf() {
+				return true
+			}
+			x0 := t.Bounds().Min.X
+			x1 := t.Bounds().Max.X
+			y0 := t.Bounds().Min.Y
+			y1 := t.Bounds().Max.Y
+			for x := x0; x < x1; x++ {
+				for y := y0; y < y1; y++ {
+					r, g, b, _ := canvas.At(x, y).RGBA()
+					c.Expect(byte(r>>8), gospec.Equals, t.Info.Cache[0][(x-x0)*3+(y-y0)*24+0])
+					c.Expect(byte(g>>8), gospec.Equals, t.Info.Cache[0][(x-x0)*3+(y-y0)*24+1])
+					c.Expect(byte(b>>8), gospec.Equals, t.Info.Cache[0][(x-x0)*3+(y-y0)*24+2])
+				}
+			}
+			return true
+		})
+	})
+}
+
+func BenchmarkSetToImage(b *testing.B) {
+	dx := 640
+	dy := 480
+	ri := randomImage{dx, dy}
+	canvas := rgb.Make(ri.Bounds())
+	draw.Draw(canvas, canvas.Bounds(), ri, image.Point{}, draw.Over)
+	t := qtree.MakeTree(dx, dy, 0, 1)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		t.SetToImage(canvas)
+	}
 }

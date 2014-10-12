@@ -13,10 +13,9 @@ type Info struct {
 	Over      bool
 	AboveOver bool
 	Power     uint64
-	Lru       []Block
+	Cache     []Block
 }
 
-// NEXT: construct a quad tree for the dims of the image.  The tree will be re-used for each frame.
 type Tree struct {
 	params *params
 

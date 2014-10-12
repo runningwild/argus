@@ -41,3 +41,16 @@ func ExtractBlock(im *rgb.Image, bounds image.Rectangle) Block {
 	}
 	return b
 }
+
+// SetToImage sets each node in the tree to match the corresponding region in im.
+func (t *Tree) SetToImage(im *rgb.Image) {
+	if t.Bounds() != im.Bounds() {
+		panic("NUB!")
+	}
+	t.TraverseBottomUp(func(t *Tree) bool {
+		if len(t.kids) == 0 {
+			t.Info.Cache = []Block{ExtractBlock(im, t.Bounds())}
+		}
+		return true
+	})
+}
