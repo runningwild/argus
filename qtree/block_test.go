@@ -36,15 +36,16 @@ func MomentBlocksSpec(c gospec.Context) {
 		canvas0 := rgb.Make(image.Rect(0, 0, 16, 16))
 		draw.Draw(canvas0, canvas0.Bounds(), r, image.Point{}, draw.Over)
 		var mb qtree.MomentBlocks
-		var blocks [4]*qtree.Block
-		qtree.ExtractBlock(canvas0, image.Rect(0, 0, 8, 8), &blocks[0])
-		qtree.ExtractBlock(canvas0, image.Rect(8, 0, 16, 8), &blocks[1])
-		qtree.ExtractBlock(canvas0, image.Rect(0, 8, 8, 16), &blocks[2])
-		qtree.ExtractBlock(canvas0, image.Rect(8, 8, 16, 16), &blocks[3])
-		mb.AddBlock(blocks[0])
-		mb.AddBlock(blocks[1])
-		mb.AddBlock(blocks[2])
-		mb.AddBlock(blocks[3])
+		blocks := []*qtree.Block{
+			new(qtree.Block), new(qtree.Block), new(qtree.Block), new(qtree.Block),
+		}
+		qtree.ExtractBlock(canvas0, image.Rect(0, 0, 8, 8), blocks[0])
+		qtree.ExtractBlock(canvas0, image.Rect(8, 0, 16, 8), blocks[1])
+		qtree.ExtractBlock(canvas0, image.Rect(0, 8, 8, 16), blocks[2])
+		qtree.ExtractBlock(canvas0, image.Rect(8, 8, 16, 16), blocks[3])
+		for _, block := range blocks {
+			mb.AddBlock(block)
+		}
 
 		canvas1 := rgb.Make(image.Rect(0, 0, 16, 16))
 		draw.Draw(canvas1, image.Rect(0, 0, 8, 8), &mb, image.Point{0, 0}, draw.Over)
