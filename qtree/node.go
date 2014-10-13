@@ -13,7 +13,7 @@ type Info struct {
 	Over      bool
 	AboveOver bool
 	Power     uint64
-	Cache     []Block
+	Cache     []*Block
 }
 
 type Tree struct {
