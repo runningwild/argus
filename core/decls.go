@@ -1,10 +1,6 @@
 // +build arm amd64
 
 // Declarations for architectures using assembly versions of the below functions.
-package utils
+package core
 
-import (
-	"github.com/runningwild/argus/qtree"
-)
-
-func Power(a, b *qtree.Block) uint64
+func Power(a, b *Block8) uint64
