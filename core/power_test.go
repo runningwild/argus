@@ -1,12 +1,12 @@
 package core_test
 
 import (
-	"github.com/orfjackal/gospec/src/gospec"
 	"github.com/runningwild/argus/core"
+	. "github.com/smartystreets/goconvey/convey"
 	"testing"
 )
 
-func PowerSpec(c gospec.Context) {
+func TestPower(t *testing.T) {
 	var b0, b1, b2, b3, b4 core.Block8
 	b0[0] = 10
 	b0[1] = 20
@@ -30,37 +30,31 @@ func PowerSpec(c gospec.Context) {
 		b4[i] = b3[i] - 1
 	}
 
-	c.Specify("Blocks have zero power relative to themselves", func() {
-		c.Expect(core.Power(&b0, &b0), gospec.Equals, uint64(0))
-		c.Expect(core.Power(&b1, &b1), gospec.Equals, uint64(0))
-		c.Expect(core.Power(&b2, &b2), gospec.Equals, uint64(0))
-		c.Expect(core.Power(&b3, &b3), gospec.Equals, uint64(0))
+	Convey("Blocks have zero power relative to themselves", t, func() {
+		So(core.Power(&b0, &b0), ShouldEqual, uint64(0))
+		So(core.Power(&b1, &b1), ShouldEqual, uint64(0))
+		So(core.Power(&b2, &b2), ShouldEqual, uint64(0))
+		So(core.Power(&b3, &b3), ShouldEqual, uint64(0))
 	})
-	c.Specify("Simple manual power check", func() {
-		c.Expect(core.Power(&b0, &b1), gospec.Equals, uint64(600))
-		c.Expect(core.Power(&b1, &b0), gospec.Equals, uint64(600))
+	Convey("Simple manual power check", t, func() {
+		So(core.Power(&b0, &b1), ShouldEqual, uint64(600))
+		So(core.Power(&b1, &b0), ShouldEqual, uint64(600))
 	})
-	c.Specify("Simple manual power check", func() {
-		c.Expect(core.Power(&b0, &b2), gospec.Equals, uint64(9100))
-		c.Expect(core.Power(&b2, &b0), gospec.Equals, uint64(9100))
+	Convey("Simple manual power check", t, func() {
+		So(core.Power(&b0, &b2), ShouldEqual, uint64(9100))
+		So(core.Power(&b2, &b0), ShouldEqual, uint64(9100))
 	})
-	c.Specify("Simple manual power check", func() {
-		c.Expect(core.Power(&b1, &b2), gospec.Equals, uint64(13900))
-		c.Expect(core.Power(&b2, &b1), gospec.Equals, uint64(13900))
+	Convey("Simple manual power check", t, func() {
+		So(core.Power(&b1, &b2), ShouldEqual, uint64(13900))
+		So(core.Power(&b2, &b1), ShouldEqual, uint64(13900))
 	})
-	c.Specify("Simple manual power check - zero vs zero", func() {
-		c.Expect(core.Power(&b2, &b2), gospec.Equals, uint64(0))
+	Convey("Simple manual power check - zero vs zero", t, func() {
+		So(core.Power(&b2, &b2), ShouldEqual, uint64(0))
 	})
-	c.Specify("Power function should cover every pixel in a block", func() {
-		c.Expect(core.Power(&b3, &b4), gospec.Equals, uint64(192))
-		c.Expect(core.Power(&b4, &b3), gospec.Equals, uint64(192))
+	Convey("Power function should cover every pixel in a block", t, func() {
+		So(core.Power(&b3, &b4), ShouldEqual, uint64(192))
+		So(core.Power(&b4, &b3), ShouldEqual, uint64(192))
 	})
-	for i := 0; i < 100; i++ {
-		var b0, b1 core.Block8
-		for i := 0; i < 100; i++ {
-			core.Power(&b0, &b1)
-		}
-	}
 }
 
 func BenchmarkPowerAllSame(b *testing.B) {
