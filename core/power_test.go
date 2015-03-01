@@ -7,7 +7,7 @@ import (
 )
 
 func TestPower(t *testing.T) {
-	var b0, b1, b2, b3, b4 core.Block8
+	var b0, b1, b2, b3, b4 core.Block8RGB
 	b0[0] = 10
 	b0[1] = 20
 	b0[2] = 30
@@ -58,7 +58,7 @@ func TestPower(t *testing.T) {
 }
 
 func BenchmarkPowerAllSame(b *testing.B) {
-	var b0, b1 core.Block8
+	var b0, b1 core.Block8RGB
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		core.Power(&b0, &b1)
@@ -66,7 +66,7 @@ func BenchmarkPowerAllSame(b *testing.B) {
 }
 
 func BenchmarkPowerAllDifferent(b *testing.B) {
-	var b0, b1 core.Block8
+	var b0, b1 core.Block8RGB
 	for i := range b1 {
 		b1[i] = byte(i)
 	}
