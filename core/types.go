@@ -1,8 +1,5 @@
 package core
 
-// 8x8 block for a single channel
-type Block8 [8 * 8]byte
-
 // 8x8 RGB values
 type Block8RGB [8 * 8 * 3]byte
 

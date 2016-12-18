@@ -1,9 +1,10 @@
 package core_test
 
 import (
+	"testing"
+
 	"github.com/runningwild/argus/core"
 	. "github.com/smartystreets/goconvey/convey"
-	"testing"
 )
 
 func TestPower(t *testing.T) {
@@ -73,5 +74,24 @@ func BenchmarkPowerAllDifferent(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		core.Power(&b0, &b1)
+	}
+}
+
+func BenchmarkPowerSlowAllSame(b *testing.B) {
+	var b0, b1 core.Block8RGB
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		core.PowerSlow(&b0, &b1)
+	}
+}
+
+func BenchmarkPowerSlowAllDifferent(b *testing.B) {
+	var b0, b1 core.Block8RGB
+	for i := range b1 {
+		b1[i] = byte(i)
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		core.PowerSlow(&b0, &b1)
 	}
 }

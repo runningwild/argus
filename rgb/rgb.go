@@ -28,6 +28,10 @@ func Make(r image.Rectangle) *Image {
 	}
 }
 
+func (im *Image) Blocks() []core.Block8RGB {
+	return im.blocks[:]
+}
+
 func (im *Image) At(x, y int) color.Color {
 	if x < 0 || y < 0 || x >= im.dx || y >= im.dy {
 		return color.Black
