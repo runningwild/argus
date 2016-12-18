@@ -2,13 +2,16 @@ package main
 
 import (
 	"encoding/binary"
+	"flag"
 	"fmt"
 	"image"
 	"image/color"
 	_ "image/jpeg"
-	_ "image/png"
+	"image/png"
 	"io"
 	"os"
+	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/runningwild/argus/core"
@@ -52,20 +55,22 @@ func (w *Writer) flushEpoch() error {
 
 func newEpoch(t time.Time, f *os.File, ref *rgb.Image) *epochWriter {
 	now := t.UnixNano() / 1e6
-	var blocks []core.Block8RGB
+	var blocks []*core.Block8RGB
 	var ΔTables []ΔTable
 	for i, block := range ref.Blocks() {
 		blocks = append(blocks, block)
-		ΔTables = append(ΔTables, ΔTable{ΔTableEntry{ms: uint32(now), block: int32(i)}})
+		ΔTables = append(ΔTables, ΔTable{ΔTableEntry{Ms: 0, Block: int32(i)}})
 	}
 	return &epochWriter{
 		f:         f,
 		ref:       ref,
 		maxPowerΔ: 10000,
-		blockDx:   int32((ref.Bounds().Dx() + 7) / 8),
-		blockDy:   int32((ref.Bounds().Dy() + 7) / 8),
-		start:     now,
-		end:       now,
+		header: &epochHeader{
+			Start:   now,
+			End:     now,
+			BlockDx: int32((ref.Bounds().Dx() + 7) / 8),
+			BlockDy: int32((ref.Bounds().Dy() + 7) / 8),
+		},
 
 		blocks:  blocks,
 		ΔTables: ΔTables,
@@ -73,7 +78,6 @@ func newEpoch(t time.Time, f *os.File, ref *rgb.Image) *epochWriter {
 }
 
 func (e *epochWriter) scanPositions(bufferΔ, bufferBlock int) starts {
-	var sizeHeader int64 = 32
 	sizeΔTableIndexes := int64(12 * (len(e.ΔTables)))
 	var sizeΔTables int64
 	for _, ΔTable := range e.ΔTables {
@@ -81,9 +85,9 @@ func (e *epochWriter) scanPositions(bufferΔ, bufferBlock int) starts {
 	}
 	return starts{
 		header:        0,
-		ΔTableIndexes: sizeHeader,
-		ΔTables:       sizeHeader + sizeΔTableIndexes,
-		blocks:        sizeHeader + sizeΔTableIndexes + sizeΔTables,
+		ΔTableIndexes: sizeEpochHeader,
+		ΔTables:       sizeEpochHeader + sizeΔTableIndexes,
+		blocks:        sizeEpochHeader + sizeΔTableIndexes + sizeΔTables,
 	}
 }
 
@@ -94,15 +98,13 @@ type starts struct {
 	blocks        int64
 }
 
-func (e *epochWriter) writeFile(f *os.File, bufferΔ, bufferBlock int) error {
+func (e *epochWriter) writeFile(f *os.File, bufferΔ, bufferBlock int) (*epochHeader, error) {
 	start := e.scanPositions(bufferΔ, bufferBlock)
 
 	// Header - 32 bytes
-	binary.Write(f, binary.LittleEndian, e.start)
-	binary.Write(f, binary.LittleEndian, e.end)
-	binary.Write(f, binary.LittleEndian, e.blockDx)
-	binary.Write(f, binary.LittleEndian, e.blockDy)
-	binary.Write(f, binary.LittleEndian, start.blocks)
+	header := e.header
+	header.BlockOffset = start.blocks
+	binary.Write(f, binary.LittleEndian, header)
 	{
 		co, _ := f.Seek(0, io.SeekCurrent)
 		if co != start.ΔTableIndexes {
@@ -129,11 +131,10 @@ func (e *epochWriter) writeFile(f *os.File, bufferΔ, bufferBlock int) error {
 	// Δ Tables
 	for i := range e.ΔTables {
 		if _, err := f.Seek(offsets[i], io.SeekStart); err != nil {
-			return err
+			return nil, err
 		}
 		for j := range e.ΔTables[i] {
-			binary.Write(f, binary.LittleEndian, e.ΔTables[i][j].ms)
-			binary.Write(f, binary.LittleEndian, e.ΔTables[i][j].block)
+			binary.Write(f, binary.LittleEndian, e.ΔTables[i][j])
 		}
 	}
 	{
@@ -142,8 +143,10 @@ func (e *epochWriter) writeFile(f *os.File, bufferΔ, bufferBlock int) error {
 			panic(fmt.Sprintf("unexpected file offset, %d != %d", co, start.blocks))
 		}
 	}
+	f.Seek(start.blocks, io.SeekStart)
 
 	// Blocks table
+
 	offset = start.blocks + 8*int64(len(e.blocks)+bufferBlock)
 	offsets = offsets[0:0]
 	for i := range e.blocks {
@@ -154,7 +157,7 @@ func (e *epochWriter) writeFile(f *os.File, bufferΔ, bufferBlock int) error {
 	}
 
 	if _, err := f.Seek(offsets[0], io.SeekStart); err != nil {
-		return err
+		return nil, err
 	}
 	for i := range e.blocks {
 		{
@@ -166,7 +169,7 @@ func (e *epochWriter) writeFile(f *os.File, bufferΔ, bufferBlock int) error {
 		binary.Write(f, binary.LittleEndian, e.blocks[i])
 	}
 
-	return nil
+	return header, nil
 }
 
 func (e *epochWriter) applyImage(im *rgb.Image, t time.Time, bufferΔ, bufferBlock int) error {
@@ -179,44 +182,42 @@ func (e *epochWriter) applyImage(im *rgb.Image, t time.Time, bufferΔ, bufferBlo
 	imBlocks := im.Blocks()
 
 	// Update the end time
-	e.end = t.UnixNano() / 1e6
+	e.header.End = t.UnixNano() / 1e6
 	e.f.Seek(8, io.SeekStart)
-	binary.Write(e.f, binary.LittleEndian, e.end)
+	binary.Write(e.f, binary.LittleEndian, e.header.End)
 
 	// Update the reference image and note each block that changed.
 	var changed []int
 	for i := range refBlocks {
-		if core.Power(&refBlocks[i], &imBlocks[i]) > e.maxPowerΔ {
-			fmt.Printf("Block %d changed \n", i)
+		if core.Power(refBlocks[i], imBlocks[i]) > e.maxPowerΔ {
 			refBlocks[i] = imBlocks[i]
 			changed = append(changed, i)
 		}
 	}
 
-	start := e.scanPositions(bufferΔ, bufferBlock)
-
 	// For each block that changed, update the index, the Δ table, and the blocks.
 	for _, b := range changed {
 		// Seek to this table's entry in the index, we'll need to read the offset into the Δ table
 		// from here because we don't store that in memory (TODO: although we could - does it matter?).
-		e.f.Seek(start.ΔTableIndexes+int64(12*b), io.SeekStart)
+		e.f.Seek(sizeEpochHeader+int64(12*b), io.SeekStart)
 		var offset int64
 		binary.Read(e.f, binary.LittleEndian, &offset)
 
 		// Increment the length of deltas for this block in the index.
-		entry := ΔTableEntry{ms: uint32(e.end - e.start), block: int32(len(e.blocks))}
+		entryNum := int32(len(e.ΔTables[b]))
+		entry := ΔTableEntry{Ms: uint32(e.header.End - e.header.Start), Block: int32(len(e.blocks))}
 		e.ΔTables[b] = append(e.ΔTables[b], entry)
 		binary.Write(e.f, binary.LittleEndian, int32(len(e.ΔTables[b])))
 
 		// Add this entry to the Δ table.
-		e.f.Seek(offset+int64(8*len(e.blocks)), io.SeekStart)
-		binary.Write(e.f, binary.LittleEndian, entry.ms)
-		binary.Write(e.f, binary.LittleEndian, entry.block)
+		e.f.Seek(offset+int64(8*entryNum), io.SeekStart)
+		fmt.Printf("Writing entry %v at %d\n", entry, offset+int64(8*entryNum))
+		binary.Write(e.f, binary.LittleEndian, entry)
 
 		// Seek to the last block previously recorded and find the offset and length, this will tell
 		// us where we can put the next block.  We are guaranteed that this isn't the first block
 		// because the initial write of the file must include every block.
-		e.f.Seek(start.blocks+int64(len(e.blocks)-1), io.SeekStart)
+		e.f.Seek(e.header.BlockOffset+8*int64(len(e.blocks)-1), io.SeekStart)
 		var off32 int32
 		var length int32
 		binary.Read(e.f, binary.LittleEndian, &off32)
@@ -234,7 +235,152 @@ func (e *epochWriter) applyImage(im *rgb.Image, t time.Time, bufferΔ, bufferBlo
 	return nil
 }
 
+// dumpAll extracts all images and dumps them into a directory.
+func dumpAll(f *os.File, target string) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("%v", r)
+		}
+	}()
+	dumpAllPanicy(f, target)
+	return
+}
+
+func check(errs ...interface{}) {
+	if err := errs[len(errs)-1]; err != nil {
+		panic(err)
+	}
+}
+
+func dumpAllPanicy(f *os.File, target string) {
+	var header epochHeader
+	check(binary.Read(f, binary.LittleEndian, &header))
+	fmt.Printf("Start/End: %v/%v\n", time.Unix(0, header.Start*1e6), time.Unix(0, header.End*1e6))
+	fmt.Printf("Dx/Dy: %d/%d\n", header.BlockDx, header.BlockDy)
+
+	// Build the index.
+	var index []ΔTableIndex
+	numBlocks := int(header.BlockDx * header.BlockDy)
+	for i := 0; i < numBlocks; i++ {
+		var x ΔTableIndex
+		check(binary.Read(f, binary.LittleEndian, &x))
+		index = append(index, x)
+	}
+
+	// Get the Δs for each block.  Along the way also track which timestamps are mentioned.
+	var tables []ΔTable
+	ts := make(map[uint32]bool)
+	for _, x := range index {
+		fmt.Printf("Index %v\n", x)
+		var table ΔTable
+		check(f.Seek(x.Offset, io.SeekStart))
+		for i := 0; i < int(x.Length); i++ {
+			var entry ΔTableEntry
+			co, _ := f.Seek(0, io.SeekCurrent)
+			binary.Read(f, binary.LittleEndian, &entry)
+			fmt.Printf("Read entry %v at %d\n", entry, co)
+			table = append(table, entry)
+			ts[entry.Ms] = true
+		}
+		tables = append(tables, table)
+	}
+
+	// Get an ordered list of timestamps.
+	var tsOrder []uint32
+	for t := range ts {
+		tsOrder = append(tsOrder, t)
+	}
+	sort.Sort(tsSlice(tsOrder))
+	fmt.Printf("TS: %v\n", tsOrder)
+
+	getBlock := func(n int) (*core.Block8RGB, error) {
+		check(f.Seek(header.BlockOffset+int64(n*8), io.SeekStart))
+		var offset, length int32
+		check(binary.Read(f, binary.LittleEndian, &offset))
+		check(binary.Read(f, binary.LittleEndian, &length))
+		check(f.Seek(int64(offset), io.SeekStart))
+		var b core.Block8RGB
+		check(binary.Read(f, binary.LittleEndian, &b))
+		return &b, nil
+	}
+
+	// Start by creating the reference image.
+	im := rgb.Make(image.Rect(0, 0, 8*int(header.BlockDx), 8*int(header.BlockDy)))
+	for _, table := range tables {
+		b, _ := getBlock(int(table[0].Block))
+		im.SetBlock(int(table[0].Block), b)
+	}
+
+	out, err := os.Create(filepath.Join(target, "ref.png"))
+	if err != nil {
+		panic(fmt.Errorf("failed to create output file: %v", err))
+	}
+	defer out.Close()
+	if err := png.Encode(out, im); err != nil {
+		panic(fmt.Errorf("failed to write image: %v", err))
+	}
+
+	// Generate an image for each timestep.
+	for _, t := range tsOrder[1:] {
+		fmt.Printf("Timestamp %d\n", t)
+		for b := range tables {
+			changed := false
+			for len(tables[b]) > 1 && tables[b][1].Ms <= t {
+				tables[b] = tables[b][1:]
+				changed = true
+			}
+			if !changed {
+				continue
+			}
+			block, err := getBlock(int(tables[b][0].Block))
+			if err != nil {
+				panic(err)
+			}
+			im.SetBlock(b, block)
+			fmt.Printf("Modified block %d to %d\n", b, tables[b][0])
+		}
+		out, err := os.Create(filepath.Join(target, fmt.Sprintf("t-%d.png", t)))
+		if err != nil {
+			panic(fmt.Errorf("failed to create output file: %v", err))
+		}
+		if err := png.Encode(out, im); err != nil {
+			out.Close()
+			panic(fmt.Errorf("failed to write image: %v", err))
+		}
+		out.Close()
+	}
+}
+
+type tsSlice []uint32
+
+func (t tsSlice) Len() int           { return len(t) }
+func (t tsSlice) Less(i, j int) bool { return t[i] < t[j] }
+func (t tsSlice) Swap(i, j int)      { t[i], t[j] = t[j], t[i] }
+
+const sizeEpochHeader = 32
+
+type epochHeader struct {
+	Start, End       int64
+	BlockDx, BlockDy int32
+	BlockOffset      int64
+}
+
+var (
+	readFile = flag.Bool("read", false, "whether to read")
+)
+
 func main() {
+	flag.Parse()
+	if *readFile {
+		f, err := os.Open("foo")
+		if err != nil {
+			panic(err)
+		}
+		if err := dumpAll(f, "output"); err != nil {
+			panic(err)
+		}
+		return
+	}
 	f, err := os.Create("foo")
 	if err != nil {
 		panic(err)
@@ -244,23 +390,27 @@ func main() {
 	im0 := rgb.Make(image.Rect(0, 0, 80, 80))
 	now := time.Now()
 	e := newEpoch(now, f, ref)
-	e.writeFile(f, 10, 1000)
+	h, err := e.writeFile(f, 10, 1000)
+	if err != nil {
+		panic(err)
+	}
+	e.header = h
 	for i := 0; i < 8; i++ {
 		for j := 0; j < 8; j++ {
 			im.Set(i, j, color.White)
 		}
 	}
 
-	now.Add(time.Millisecond)
+	now = now.Add(time.Millisecond)
 	e.applyImage(im, now, 10, 1000)
 
-	now.Add(time.Millisecond)
+	now = now.Add(time.Millisecond)
 	e.applyImage(im, now, 10, 1000)
 
-	now.Add(time.Millisecond)
+	now = now.Add(time.Millisecond)
 	e.applyImage(im, now, 10, 1000)
 
-	now.Add(time.Millisecond)
+	now = now.Add(time.Millisecond)
 	e.applyImage(im0, now, 10, 1000)
 }
 
@@ -269,20 +419,24 @@ type epochWriter struct {
 	ref       *rgb.Image
 	maxPowerΔ uint64
 
-	start, end       int64    //   16 bytes
-	blockDx, blockDy int32    //    8 bytes
-	ΔTables          []ΔTable //
+	header  *epochHeader
+	ΔTables []ΔTable
 
-	blocks []core.Block8RGB
+	blocks []*core.Block8RGB
 }
 
 // ΔTable contains all of the Δs for a block.  The entries are ordered by ms since the start of the epoch.
 type ΔTable []ΔTableEntry
 
+type ΔTableIndex struct {
+	Offset int64 // Offset from the start of the file of Δ table for this block.
+	Length int32 // Number of Δs this block has.
+}
+
 type ΔTableEntry struct {
 	// TODO: This could just be a counter, and we could have a separate table for times
-	ms    uint32 // Time in ms since the start of this epoch, good enough for 49 days.
-	block int32  // Index into block table
+	Ms    uint32 // Time in ms since the start of this epoch, good enough for 49 days.
+	Block int32  // Index into block table
 }
 
 type Reader struct {

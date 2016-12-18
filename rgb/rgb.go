@@ -10,7 +10,7 @@ import (
 )
 
 type Image struct {
-	blocks []core.Block8RGB
+	blocks []*core.Block8RGB
 
 	// Width and Height in blocks, which may be larger than the actual width and height
 	blockDx, blockDy int
@@ -19,8 +19,12 @@ type Image struct {
 }
 
 func Make(r image.Rectangle) *Image {
+	blocks := make([]*core.Block8RGB, ((r.Dx()+7)/8)*((r.Dy()+7)/8))
+	for i := range blocks {
+		blocks[i] = new(core.Block8RGB)
+	}
 	return &Image{
-		blocks:  make([]core.Block8RGB, (r.Dx()+7)*(r.Dy()+7)/64),
+		blocks:  blocks,
 		blockDx: (r.Dx() + 7) / 8,
 		blockDy: (r.Dy() + 7) / 8,
 		dx:      r.Dx(),
@@ -28,8 +32,12 @@ func Make(r image.Rectangle) *Image {
 	}
 }
 
-func (im *Image) Blocks() []core.Block8RGB {
+func (im *Image) Blocks() []*core.Block8RGB {
 	return im.blocks[:]
+}
+
+func (im *Image) SetBlock(b int, block *core.Block8RGB) {
+	im.blocks[b] = block
 }
 
 func (im *Image) At(x, y int) color.Color {
@@ -37,7 +45,7 @@ func (im *Image) At(x, y int) color.Color {
 		return color.Black
 	}
 	boff, poff := im.blockAndPixOffset(x, y)
-	return color.RGBA{im.blocks[boff][poff+0], im.blocks[boff][poff+1], im.blocks[boff][poff+2], 255}
+	return color.RGBA{(*im.blocks[boff])[poff+0], (*im.blocks[boff])[poff+1], (*im.blocks[boff])[poff+2], 255}
 }
 
 func (im *Image) Set(x, y int, c color.Color) {
@@ -46,9 +54,9 @@ func (im *Image) Set(x, y int, c color.Color) {
 	}
 	boff, poff := im.blockAndPixOffset(x, y)
 	cr, cg, cb, _ := c.RGBA()
-	im.blocks[boff][poff+0] = byte(cr >> 8)
-	im.blocks[boff][poff+1] = byte(cg >> 8)
-	im.blocks[boff][poff+2] = byte(cb >> 8)
+	(*im.blocks[boff])[poff+0] = byte(cr >> 8)
+	(*im.blocks[boff])[poff+1] = byte(cg >> 8)
+	(*im.blocks[boff])[poff+2] = byte(cb >> 8)
 }
 
 func (im *Image) Bounds() image.Rectangle {
