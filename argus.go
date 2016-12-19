@@ -1,17 +1,20 @@
 package main
 
 import (
+	"bytes"
 	"encoding/binary"
 	"flag"
 	"fmt"
 	"image"
-	"image/color"
+	"image/draw"
 	_ "image/jpeg"
 	"image/png"
 	"io"
+	"io/ioutil"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/runningwild/argus/core"
@@ -64,7 +67,7 @@ func newEpoch(t time.Time, f *os.File, ref *rgb.Image) *epochWriter {
 	return &epochWriter{
 		f:         f,
 		ref:       ref,
-		maxPowerΔ: 10000,
+		maxPowerΔ: 30000,
 		header: &epochHeader{
 			Start:   now,
 			End:     now,
@@ -172,7 +175,7 @@ func (e *epochWriter) writeFile(f *os.File, bufferΔ, bufferBlock int) (*epochHe
 	return header, nil
 }
 
-func (e *epochWriter) applyImage(im *rgb.Image, t time.Time, bufferΔ, bufferBlock int) error {
+func (e *epochWriter) applyImage(im *rgb.Image, t time.Time, bufferΔ, bufferBlock int) (int, error) {
 	// The following things all need to be updated:
 	// End time
 	// Indexes for every block that changed
@@ -232,17 +235,17 @@ func (e *epochWriter) applyImage(im *rgb.Image, t time.Time, bufferΔ, bufferBlo
 		e.blocks = append(e.blocks, refBlocks[b])
 	}
 
-	return nil
+	return len(changed), nil
 }
 
 // dumpAll extracts all images and dumps them into a directory.
-func dumpAll(f *os.File, target string) (err error) {
+func dumpAll(f *os.File, target string, blocks map[int]bool) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("%v", r)
 		}
 	}()
-	dumpAllPanicy(f, target)
+	dumpAllPanicy(f, target, blocks)
 	return
 }
 
@@ -252,7 +255,7 @@ func check(errs ...interface{}) {
 	}
 }
 
-func dumpAllPanicy(f *os.File, target string) {
+func dumpAllPanicy(f *os.File, target string, blocks map[int]bool) {
 	var header epochHeader
 	check(binary.Read(f, binary.LittleEndian, &header))
 	fmt.Printf("Start/End: %v/%v\n", time.Unix(0, header.Start*1e6), time.Unix(0, header.End*1e6))
@@ -321,17 +324,21 @@ func dumpAllPanicy(f *os.File, target string) {
 	}
 
 	// Generate an image for each timestep.
+	changedBlocks := make(map[int]bool)
 	for _, t := range tsOrder[1:] {
 		fmt.Printf("Timestamp %d\n", t)
+		relevant := false
 		for b := range tables {
-			changed := false
 			for len(tables[b]) > 1 && tables[b][1].Ms <= t {
 				tables[b] = tables[b][1:]
-				changed = true
+				changedBlocks[b] = true
+				relevant = relevant || (blocks == nil || blocks[b])
 			}
-			if !changed {
-				continue
-			}
+		}
+		if len(changedBlocks) == 0 || !relevant {
+			continue
+		}
+		for b := range changedBlocks {
 			block, err := getBlock(int(tables[b][0].Block))
 			if err != nil {
 				panic(err)
@@ -339,7 +346,7 @@ func dumpAllPanicy(f *os.File, target string) {
 			im.SetBlock(b, block)
 			fmt.Printf("Modified block %d to %d\n", b, tables[b][0])
 		}
-		out, err := os.Create(filepath.Join(target, fmt.Sprintf("t-%d.png", t)))
+		out, err := os.Create(filepath.Join(target, fmt.Sprintf("t-%07d.png", t)))
 		if err != nil {
 			panic(fmt.Errorf("failed to create output file: %v", err))
 		}
@@ -348,6 +355,7 @@ func dumpAllPanicy(f *os.File, target string) {
 			panic(fmt.Errorf("failed to write image: %v", err))
 		}
 		out.Close()
+		changedBlocks = make(map[int]bool)
 	}
 }
 
@@ -376,7 +384,12 @@ func main() {
 		if err != nil {
 			panic(err)
 		}
-		if err := dumpAll(f, "output"); err != nil {
+		blocks := make(map[int]bool)
+		for i := 0; i < 40; i++ {
+			blocks[i] = true
+		}
+		blocks = nil
+		if err := dumpAll(f, "output", blocks); err != nil {
 			panic(err)
 		}
 		return
@@ -385,33 +398,59 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	ref := rgb.Make(image.Rect(0, 0, 80, 80))
-	im := rgb.Make(image.Rect(0, 0, 80, 80))
-	im0 := rgb.Make(image.Rect(0, 0, 80, 80))
+
+	frames := make(chan *rgb.Image)
+	go func() {
+		defer close(frames)
+		filepath.Walk("input", func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return nil
+			}
+			if info.IsDir() {
+				return nil
+			}
+			if strings.HasSuffix(path, ".png") {
+				data, err := ioutil.ReadFile(path)
+				if err != nil {
+					fmt.Printf("failed to load %q: %v", path, err)
+					return nil
+				}
+				frame, _, err := image.Decode(bytes.NewBuffer(data))
+				if err != nil {
+					fmt.Printf("failed to decode %q: %v", path, err)
+					return nil
+				}
+				im := rgb.Make(frame.Bounds())
+				draw.Draw(im, frame.Bounds(), frame, image.Point{}, draw.Over)
+				frames <- im
+			}
+			return nil
+		})
+	}()
+
+	frame := <-frames
+	ref := rgb.Make(frame.Bounds())
 	now := time.Now()
 	e := newEpoch(now, f, ref)
-	h, err := e.writeFile(f, 10, 1000)
+	h, err := e.writeFile(f, 3000, 1000000)
 	if err != nil {
 		panic(err)
 	}
 	e.header = h
-	for i := 0; i < 8; i++ {
-		for j := 0; j < 8; j++ {
-			im.Set(i, j, color.White)
-		}
+
+	for frame := range frames {
+		now = now.Add(time.Millisecond)
+		n, _ := e.applyImage(frame, now, 3000, 1000000)
+		fmt.Printf("%d blocks changed\n", n)
 	}
-
-	now = now.Add(time.Millisecond)
-	e.applyImage(im, now, 10, 1000)
-
-	now = now.Add(time.Millisecond)
-	e.applyImage(im, now, 10, 1000)
-
-	now = now.Add(time.Millisecond)
-	e.applyImage(im, now, 10, 1000)
-
-	now = now.Add(time.Millisecond)
-	e.applyImage(im0, now, 10, 1000)
+	{
+		comp, err := os.Create("compressed.argus")
+		if err != nil {
+			panic(err)
+		}
+		defer comp.Close()
+		e.writeFile(comp, 0, 0)
+	}
 }
 
 type epochWriter struct {
