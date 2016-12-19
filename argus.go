@@ -176,11 +176,6 @@ func (e *epochWriter) writeFile(f *os.File, bufferΔ, bufferBlock int) (*epochHe
 }
 
 func (e *epochWriter) applyImage(im *rgb.Image, t time.Time, bufferΔ, bufferBlock int) (int, error) {
-	// The following things all need to be updated:
-	// End time
-	// Indexes for every block that changed
-	// Deltas for every block that changed
-	// Blocks appended for all new blocks
 	refBlocks := e.ref.Blocks()
 	imBlocks := im.Blocks()
 
@@ -206,9 +201,22 @@ func (e *epochWriter) applyImage(im *rgb.Image, t time.Time, bufferΔ, bufferBlo
 		var offset int64
 		binary.Read(e.f, binary.LittleEndian, &offset)
 
+		// Check previous blocks to see if there are any we can reuse.
+		blockIndex := int32(len(e.blocks))
+		table := e.ΔTables[b]
+		for i := len(table) - 1; i >= 0; i-- {
+			block := table[i]
+			// fmt.Printf("%d %d\n", len(e.blocks), block.Block)
+			if power := core.Power(e.blocks[block.Block], refBlocks[b]); power < e.maxPowerΔ {
+				fmt.Printf("Reusing block %d in block %d", block.Block, b)
+				blockIndex = block.Block
+				break
+			}
+		}
+
 		// Increment the length of deltas for this block in the index.
 		entryNum := int32(len(e.ΔTables[b]))
-		entry := ΔTableEntry{Ms: uint32(e.header.End - e.header.Start), Block: int32(len(e.blocks))}
+		entry := ΔTableEntry{Ms: uint32(e.header.End - e.header.Start), Block: blockIndex}
 		e.ΔTables[b] = append(e.ΔTables[b], entry)
 		binary.Write(e.f, binary.LittleEndian, int32(len(e.ΔTables[b])))
 
@@ -217,22 +225,24 @@ func (e *epochWriter) applyImage(im *rgb.Image, t time.Time, bufferΔ, bufferBlo
 		fmt.Printf("Writing entry %v at %d\n", entry, offset+int64(8*entryNum))
 		binary.Write(e.f, binary.LittleEndian, entry)
 
-		// Seek to the last block previously recorded and find the offset and length, this will tell
-		// us where we can put the next block.  We are guaranteed that this isn't the first block
-		// because the initial write of the file must include every block.
-		e.f.Seek(e.header.BlockOffset+8*int64(len(e.blocks)-1), io.SeekStart)
-		var off32 int32
-		var length int32
-		binary.Read(e.f, binary.LittleEndian, &off32)
-		binary.Read(e.f, binary.LittleEndian, &length)
-		binary.Write(e.f, binary.LittleEndian, off32+length)
-		binary.Write(e.f, binary.LittleEndian, int32(len(refBlocks[b])))
+		if blockIndex == int32(len(e.blocks)) {
+			// Seek to the last block previously recorded and find the offset and length, this will tell
+			// us where we can put the next block.  We are guaranteed that this isn't the first block
+			// because the initial write of the file must include every block.
+			e.f.Seek(e.header.BlockOffset+8*int64(len(e.blocks)-1), io.SeekStart)
+			var off32 int32
+			var length int32
+			binary.Read(e.f, binary.LittleEndian, &off32)
+			binary.Read(e.f, binary.LittleEndian, &length)
+			binary.Write(e.f, binary.LittleEndian, off32+length)
+			binary.Write(e.f, binary.LittleEndian, int32(len(refBlocks[b])))
 
-		// Now actually write the block itself.
-		e.f.Seek(int64(off32+length), io.SeekStart)
-		binary.Write(e.f, binary.LittleEndian, refBlocks[b])
+			// Now actually write the block itself.
+			e.f.Seek(int64(off32+length), io.SeekStart)
+			binary.Write(e.f, binary.LittleEndian, refBlocks[b])
 
-		e.blocks = append(e.blocks, refBlocks[b])
+			e.blocks = append(e.blocks, refBlocks[b])
+		}
 	}
 
 	return len(changed), nil
