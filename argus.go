@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"flag"
 	"fmt"
+	"hash/crc64"
 	"image"
 	"image/draw"
 	_ "image/jpeg"
@@ -58,25 +59,45 @@ func (w *Writer) flushEpoch() error {
 
 func newEpoch(t time.Time, f *os.File, ref *rgb.Image) *epochWriter {
 	now := t.UnixNano() / 1e6
+	var maxPowerΔ uint64 = 1000
 	var blocks []*core.Block8RGB
 	var ΔTables []ΔTable
+	hashedBlocks := make(map[uint64][]int)
+
+outerLoop:
 	for i, block := range ref.Blocks() {
+		hash := hashBlock(block)
+		for _, hashIndex := range hashedBlocks[hash] {
+			if core.Power(block, blocks[hashIndex]) < maxPowerΔ {
+				ΔTables = append(ΔTables, ΔTable{ΔTableEntry{Ms: 0, Block: int32(hashIndex)}})
+				fmt.Printf("Using block index %d for block %d\n", hashIndex, i)
+				continue outerLoop
+			}
+		}
+
+		ΔTables = append(ΔTables, ΔTable{ΔTableEntry{Ms: 0, Block: int32(len(blocks))}})
+		hashedBlocks[hash] = append(hashedBlocks[hash], len(blocks))
+		if len(hashedBlocks[hash]) > maxHash {
+			maxHash = len(hashedBlocks[hash])
+			fmt.Printf("Hashed %d\n", maxHash)
+		}
 		blocks = append(blocks, block)
-		ΔTables = append(ΔTables, ΔTable{ΔTableEntry{Ms: 0, Block: int32(i)}})
 	}
+	maxPowerΔ = 30000
 	return &epochWriter{
 		f:         f,
 		ref:       ref,
-		maxPowerΔ: 30000,
+		maxPowerΔ: maxPowerΔ,
 		header: &epochHeader{
 			Start:   now,
 			End:     now,
 			BlockDx: int32((ref.Bounds().Dx() + 7) / 8),
 			BlockDy: int32((ref.Bounds().Dy() + 7) / 8),
 		},
-
-		blocks:  blocks,
 		ΔTables: ΔTables,
+
+		blocks:       blocks,
+		hashedBlocks: hashedBlocks,
 	}
 }
 
@@ -201,15 +222,13 @@ func (e *epochWriter) applyImage(im *rgb.Image, t time.Time, bufferΔ, bufferBlo
 		var offset int64
 		binary.Read(e.f, binary.LittleEndian, &offset)
 
-		// Check previous blocks to see if there are any we can reuse.
 		blockIndex := int32(len(e.blocks))
-		table := e.ΔTables[b]
-		for i := len(table) - 1; i >= 0; i-- {
-			block := table[i]
-			// fmt.Printf("%d %d\n", len(e.blocks), block.Block)
-			if power := core.Power(e.blocks[block.Block], refBlocks[b]); power < e.maxPowerΔ {
-				fmt.Printf("Reusing block %d in block %d", block.Block, b)
-				blockIndex = block.Block
+		hash := hashBlock(refBlocks[b])
+
+		for _, index := range e.hashedBlocks[hash] {
+			if power := core.Power(e.blocks[index], refBlocks[b]); power < e.maxPowerΔ {
+				fmt.Printf("Reusing block %d in block %d\n", index, b)
+				blockIndex = int32(index)
 				break
 			}
 		}
@@ -222,7 +241,6 @@ func (e *epochWriter) applyImage(im *rgb.Image, t time.Time, bufferΔ, bufferBlo
 
 		// Add this entry to the Δ table.
 		e.f.Seek(offset+int64(8*entryNum), io.SeekStart)
-		fmt.Printf("Writing entry %v at %d\n", entry, offset+int64(8*entryNum))
 		binary.Write(e.f, binary.LittleEndian, entry)
 
 		if blockIndex == int32(len(e.blocks)) {
@@ -242,11 +260,18 @@ func (e *epochWriter) applyImage(im *rgb.Image, t time.Time, bufferΔ, bufferBlo
 			binary.Write(e.f, binary.LittleEndian, refBlocks[b])
 
 			e.blocks = append(e.blocks, refBlocks[b])
+			e.hashedBlocks[hash] = append(e.hashedBlocks[hash], int(blockIndex))
+			if len(e.hashedBlocks[hash]) > maxHash {
+				maxHash = len(e.hashedBlocks[hash])
+				fmt.Printf("Hashed %d\n", maxHash)
+			}
 		}
 	}
 
 	return len(changed), nil
 }
+
+var maxHash int = 0
 
 // dumpAll extracts all images and dumps them into a directory.
 func dumpAll(f *os.File, target string, blocks map[int]bool) (err error) {
@@ -319,9 +344,9 @@ func dumpAllPanicy(f *os.File, target string, blocks map[int]bool) {
 
 	// Start by creating the reference image.
 	im := rgb.Make(image.Rect(0, 0, 8*int(header.BlockDx), 8*int(header.BlockDy)))
-	for _, table := range tables {
+	for place, table := range tables {
 		b, _ := getBlock(int(table[0].Block))
-		im.SetBlock(int(table[0].Block), b)
+		im.SetBlock(place, b)
 	}
 
 	out, err := os.Create(filepath.Join(target, "ref.png"))
@@ -439,9 +464,8 @@ func main() {
 	}()
 
 	frame := <-frames
-	ref := rgb.Make(frame.Bounds())
 	now := time.Now()
-	e := newEpoch(now, f, ref)
+	e := newEpoch(now, f, frame)
 	h, err := e.writeFile(f, 3000, 1000000)
 	if err != nil {
 		panic(err)
@@ -450,8 +474,7 @@ func main() {
 
 	for frame := range frames {
 		now = now.Add(time.Millisecond)
-		n, _ := e.applyImage(frame, now, 3000, 1000000)
-		fmt.Printf("%d blocks changed\n", n)
+		_, _ = e.applyImage(frame, now, 3000, 1000000)
 	}
 	{
 		comp, err := os.Create("compressed.argus")
@@ -472,6 +495,23 @@ type epochWriter struct {
 	ΔTables []ΔTable
 
 	blocks []*core.Block8RGB
+
+	// Map from CRC to slice of indexes into blocks.
+	hashedBlocks map[uint64][]int
+}
+
+func hashBlock(block *core.Block8RGB) uint64 {
+	data := make([]byte, len(*block))
+	for i, b := range *block {
+		data[i] = b & 0xc0
+	}
+	return crc64.Checksum(data, crcTable)
+}
+
+var crcTable *crc64.Table
+
+func init() {
+	crcTable = crc64.MakeTable(crc64.ECMA)
 }
 
 // ΔTable contains all of the Δs for a block.  The entries are ordered by ms since the start of the epoch.
