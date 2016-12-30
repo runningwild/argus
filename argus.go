@@ -59,7 +59,7 @@ func (w *Writer) flushEpoch() error {
 
 func newEpoch(t time.Time, f *os.File, ref *rgb.Image) *epochWriter {
 	now := t.UnixNano() / 1e6
-	var maxPowerΔ uint64 = 1000
+	var maxPowerΔ uint64 = 5000
 	var blocks []*core.Block8RGB
 	var ΔTables []ΔTable
 	hashedBlocks := make(map[uint64][]int)
@@ -175,9 +175,9 @@ func (e *epochWriter) writeFile(f *os.File, bufferΔ, bufferBlock int) (*epochHe
 	offsets = offsets[0:0]
 	for i := range e.blocks {
 		binary.Write(f, binary.LittleEndian, int32(offset))
-		binary.Write(f, binary.LittleEndian, int32(len(e.blocks[i])))
+		binary.Write(f, binary.LittleEndian, int32(len(*e.blocks[i])))
 		offsets = append(offsets, offset)
-		offset += int64(len(e.blocks[i]))
+		offset += int64(len(*e.blocks[i]))
 	}
 
 	if _, err := f.Seek(offsets[0], io.SeekStart); err != nil {
@@ -253,7 +253,7 @@ func (e *epochWriter) applyImage(im *rgb.Image, t time.Time, bufferΔ, bufferBlo
 			binary.Read(e.f, binary.LittleEndian, &off32)
 			binary.Read(e.f, binary.LittleEndian, &length)
 			binary.Write(e.f, binary.LittleEndian, off32+length)
-			binary.Write(e.f, binary.LittleEndian, int32(len(refBlocks[b])))
+			binary.Write(e.f, binary.LittleEndian, int32(len(*refBlocks[b])))
 
 			// Now actually write the block itself.
 			e.f.Seek(int64(off32+length), io.SeekStart)
