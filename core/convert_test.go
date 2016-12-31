@@ -3,10 +3,29 @@ package core_test
 import (
 	"testing"
 
-	"fmt"
 	"github.com/runningwild/argus/core"
 	. "github.com/smartystreets/goconvey/convey"
+	"fmt"
 )
+
+func TestFixedPointResemblesFloatingPoint(t *testing.T) {
+	Convey("f", t, func() {
+		for ri := 0; ri < 256; ri++ {
+			for gi := 0; gi < 256; gi++ {
+				for bi := 0; bi < 256; bi++ {
+					Lf, Af, Bf := core.RGBtoLABf(float64(ri), float64(gi), float64(bi))
+					Li, Ai, Bi := core.RGBtoLABi(int32(ri), int32(gi), int32(bi))
+					fmt.Printf("%0.2f %0.2f %0.2f    %0.2f %0.2f %0.2f\n", Lf, Af, Bf, float64(Li)/(1<<20), float64(Ai)/(1<<20), float64(Bi)/(1<<20))
+					dL := (Lf - float64(Li)/(1<<20))
+					dA := (Af - float64(Ai)/(1<<20))
+					dB := (Bf - float64(Bi)/(1<<20))
+					diff := dL*dL + dA*dA + dB*dB
+					So(diff, ShouldBeLessThan, 10)
+				}}}
+	})
+
+}
+
 
 func TestRGBToLABToRGB(t *testing.T) {
 	Convey("f", t, func() {
@@ -70,5 +89,29 @@ func BenchmarkLABtoRGB(b *testing.B) {
 func BenchmarkRGBtoLAB(b *testing.B) {
 	for i:=0;i<b.N;i++ {
 		core.RGBtoLAB(0,0,0)
+	}
+}
+
+func BenchmarkLABtoRGBf(b *testing.B) {
+	for i:=0;i<b.N;i++ {
+		core.LABtoRGBf(0,0,0)
+	}
+}
+
+func BenchmarkRGBtoLABf(b *testing.B) {
+	for i:=0;i<b.N;i++ {
+		core.RGBtoLABf(0,0,0)
+	}
+}
+
+func BenchmarkLABtoRGBfast(b *testing.B) {
+	for i:=0;i<b.N;i++ {
+		core.LABtoRGBfast(0,0,0)
+	}
+}
+
+func BenchmarkRGBtoLABfast(b *testing.B) {
+	for i:=0;i<b.N;i++ {
+		core.RGBtoLABfast(0,0,0)
 	}
 }
